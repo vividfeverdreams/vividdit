@@ -17,10 +17,15 @@ export default function Home() {
         </p>
       </div>
       <div className="flex gap-3">
-        <Button render={<Link href="/signup" />} size="lg">
+        <Button render={<Link href="/signup" />} nativeButton={false} size="lg">
           Get started free
         </Button>
-        <Button render={<Link href="/login" />} size="lg" variant="outline">
+        <Button
+          render={<Link href="/login" />}
+          nativeButton={false}
+          size="lg"
+          variant="outline"
+        >
           Log in
         </Button>
       </div>
