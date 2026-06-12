@@ -127,6 +127,43 @@ type RunResult = {
   error: string | null
 }
 
+/**
+ * Server-side decision policy — the model proposes, this disposes.
+ * Pure so the matrix is unit-testable.
+ */
+export function decideFinalStatus(
+  outcome: VerificationOutcome | null,
+  required: { like: boolean; repost: boolean; follow: boolean },
+  fraudFlags: string[]
+): "approved" | "rejected" | "needs_review" {
+  let finalStatus: "approved" | "rejected" | "needs_review" = "needs_review"
+
+  if (outcome) {
+    const allConfirmed =
+      (!required.like || outcome.like_confirmed) &&
+      (!required.repost || outcome.repost_confirmed) &&
+      (!required.follow || outcome.follow_confirmed)
+
+    if (
+      outcome.decision === "approve" &&
+      outcome.confidence >= 0.9 &&
+      allConfirmed &&
+      !outcome.tampering_suspected
+    ) {
+      finalStatus = "approved"
+    } else if (outcome.decision === "reject" && outcome.confidence >= 0.8) {
+      finalStatus = "rejected"
+    }
+  }
+
+  // Fraud signals veto auto-approval — the creator gets the final call.
+  if (finalStatus === "approved" && fraudFlags.length > 0) {
+    finalStatus = "needs_review"
+  }
+
+  return finalStatus
+}
+
 export async function runVerification(submissionId: string): Promise<void> {
   const admin = createAdminClient()
 
@@ -277,32 +314,15 @@ export async function runVerification(submissionId: string): Promise<void> {
     }
   }
 
-  // Server-side decision policy — the model proposes, this disposes.
-  let finalStatus: "approved" | "rejected" | "needs_review" = "needs_review"
-  const o = result.outcome
-  if (o) {
-    const allConfirmed =
-      (!criteria.requireLike || o.like_confirmed) &&
-      (!criteria.requireRepost || o.repost_confirmed) &&
-      (!criteria.requireFollow || o.follow_confirmed)
-
-    if (
-      o.decision === "approve" &&
-      o.confidence >= 0.9 &&
-      allConfirmed &&
-      !o.tampering_suspected
-    ) {
-      finalStatus = "approved"
-    } else if (o.decision === "reject" && o.confidence >= 0.8) {
-      finalStatus = "rejected"
-    }
-  }
-
-  // Fraud signals veto auto-approval — the creator gets the final call.
-  const flags = (submission.fraud_flags as string[]) ?? []
-  if (finalStatus === "approved" && flags.length > 0) {
-    finalStatus = "needs_review"
-  }
+  const finalStatus = decideFinalStatus(
+    result.outcome,
+    {
+      like: criteria.requireLike,
+      repost: criteria.requireRepost,
+      follow: criteria.requireFollow,
+    },
+    (submission.fraud_flags as string[]) ?? []
+  )
 
   await admin.from("verification_runs").insert({
     submission_id: submissionId,

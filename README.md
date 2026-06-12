@@ -1,36 +1,56 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Vividdit
 
-## Getting Started
+Free download gates for SoundCloud artists. Fans unlock an HQ file (WAV/AIFF/ZIP)
+by joining your email list and/or proving like · repost · follow with a single
+screenshot — verified by AI using **your own OpenAI key** (BYOK). No SoundCloud
+API, no browser automation: the track stays public, the download is the reward.
 
-First, run the development server:
+## How it works
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
+1. **Creator** publishes a gate: SoundCloud track + private HQ file + unlock
+   requirements + immutable URL (`/artist/track-slug`).
+2. **Fan** lands on the gate from the track's buy-link, does the actions on the
+   SoundCloud track page, pastes a one-time proof code into the comment box,
+   and uploads one screenshot.
+3. **AI verification** (OpenAI Responses API, structured outputs) approves,
+   rejects with a fix-it message, or routes to the creator's review queue.
+   Server-side policy has the final say; fraud signals veto auto-approval.
+4. **Delivery**: approved fans download via short-lived signed URLs — on the
+   page instantly, or via a tokenized email link after manual review.
+
+## Stack
+
+Next.js (App Router) · TypeScript · Tailwind + shadcn/ui · Supabase
+(Auth/Postgres/Storage, full RLS) · Resend · Vercel.
+
+## Development
+
+Prereqs: Node 20+, pnpm, Docker (OrbStack/Docker Desktop).
+
+```sh
+pnpm install
+pnpm exec supabase start    # local stack; prints keys
+cp .env.example .env.local  # fill in values from `supabase status`
 pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Useful local URLs: Studio `http://127.0.0.1:54323`, Mailpit (auth emails)
+`http://127.0.0.1:54324`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Tests
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```sh
+pnpm test    # unit + integration (integration self-skips without the local stack)
+```
 
-## Learn More
+Coverage map: [docs/TEST-PLAN.md](docs/TEST-PLAN.md).
 
-To learn more about Next.js, take a look at the following resources:
+## Deploying
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Runbook: [docs/DEPLOY.md](docs/DEPLOY.md) — hosted Supabase, Vercel, Resend,
+cron, and the post-deploy checklist.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Docs
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- [docs/PLAN.md](docs/PLAN.md) — original product/MVP plan
+- [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) — phased build plan
