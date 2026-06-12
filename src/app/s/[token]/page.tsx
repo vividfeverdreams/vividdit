@@ -60,6 +60,20 @@ export default async function StatusPage({
   const gate = submission.gates as unknown as { title: string; artist: string }
   const copy = STATUS_COPY[submission.status] ?? STATUS_COPY.pending
 
+  // Surface the AI's explanation so rejected fans know what to fix.
+  let fanMessage: string | null = null
+  if (["rejected", "needs_review"].includes(submission.status)) {
+    const { data: run } = await admin
+      .from("verification_runs")
+      .select("result")
+      .eq("submission_id", submission.id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    const result = run?.result as { fan_message?: string } | null
+    fanMessage = result?.fan_message || null
+  }
+
   return (
     <main className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center gap-4 px-4 py-10">
       <Card>
@@ -84,6 +98,9 @@ export default async function StatusPage({
         </CardHeader>
         <CardContent className="space-y-2 text-sm text-muted-foreground">
           <p>{copy.body}</p>
+          {fanMessage && (
+            <p className="rounded-lg border p-3 text-foreground">{fanMessage}</p>
+          )}
           <p>
             Proof code:{" "}
             <span className="font-mono text-foreground">

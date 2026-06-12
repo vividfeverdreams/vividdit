@@ -197,68 +197,74 @@ export function UnlockPanel({
 
         {phase.name === "proofs" && (
           <>
-            <div className="space-y-2">
-              <h2 className="font-medium">Step 1 — do the actions</h2>
-              <ol className="space-y-1 text-sm text-muted-foreground">
+            <div className="space-y-3">
+              <h2 className="font-medium">
+                Step 1 — everything happens on the track page
+              </h2>
+              <Button
+                onClick={() => {
+                  // Desktop: popup beside this page so the proof code stays
+                  // visible. Mobile: regular tab (popups aren't a thing there).
+                  window.open(
+                    track.soundcloudUrl,
+                    "vividdit-soundcloud",
+                    window.innerWidth > 900
+                      ? "width=1100,height=800,noopener"
+                      : "noopener"
+                  )
+                }}
+                className="w-full"
+                style={{ backgroundColor: accent }}
+              >
+                Open the track on SoundCloud ↗
+              </Button>
+              <ul className="space-y-1 text-sm text-muted-foreground">
                 {requirements.requireLike && (
                   <li>
-                    1. Open{" "}
-                    <a
-                      href={track.soundcloudUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="underline"
-                      style={{ color: accent }}
-                    >
-                      the track
-                    </a>{" "}
-                    and tap <strong>Like</strong> (heart).
+                    ♥ Tap <strong>Like</strong> — the heart under the waveform.
                   </li>
                 )}
                 {requirements.requireRepost && (
                   <li>
-                    {requirements.requireLike ? 2 : 1}. On the same track, tap{" "}
-                    <strong>Repost</strong>.
+                    ⟳ Tap <strong>Repost</strong> — right next to the heart.
                   </li>
                 )}
                 {requirements.requireFollow && (
                   <li>
-                    {1 +
-                      (requirements.requireLike ? 1 : 0) +
-                      (requirements.requireRepost ? 1 : 0)}
-                    . Open{" "}
-                    {track.artistProfileUrl ? (
-                      <a
-                        href={track.artistProfileUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="underline"
-                        style={{ color: accent }}
-                      >
-                        {track.artistName}&apos;s profile
-                      </a>
-                    ) : (
-                      <strong>{track.artistName}&apos;s profile</strong>
-                    )}{" "}
-                    and tap <strong>Follow</strong>.
+                    + Tap <strong>Follow</strong> on {track.artistName}&apos;s
+                    card (left side under the artwork, or via their profile).
                   </li>
                 )}
-              </ol>
+              </ul>
             </div>
 
             <div className="space-y-2">
-              <h2 className="font-medium">Step 2 — screenshot the proof</h2>
+              <h2 className="font-medium">Step 2 — one screenshot proves it all</h2>
+              <div className="flex items-center gap-2 rounded-lg border p-3">
+                <code className="text-lg font-semibold tracking-wider">
+                  {phase.proofCode}
+                </code>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="ml-auto"
+                  onClick={() => navigator.clipboard.writeText(phase.proofCode)}
+                >
+                  Copy code
+                </Button>
+              </div>
               <p className="text-sm text-muted-foreground">
-                {requirements.requireLike || requirements.requireRepost
-                  ? "Screenshot the track page showing the liked/reposted state. "
-                  : ""}
-                {requirements.requireFollow
-                  ? "Screenshot the artist profile showing “Following”. "
-                  : ""}
-                If you can, include your proof code{" "}
-                <strong className="font-mono">{phase.proofCode}</strong> visible in
-                the screenshot (e.g. in a comment draft or note) — it speeds up
-                approval.
+                Paste this code into the track&apos;s <strong>comment box</strong>{" "}
+                (no need to post it!), then take <strong>one screenshot</strong>{" "}
+                of the track page showing{" "}
+                {[
+                  requirements.requireLike && "the red liked heart",
+                  requirements.requireRepost && "the active repost",
+                  requirements.requireFollow && "“Following” on the artist card",
+                ]
+                  .filter(Boolean)
+                  .join(", ")}{" "}
+                and the code in the comment box.
               </p>
             </div>
 

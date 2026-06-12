@@ -1,7 +1,8 @@
-import { NextResponse, type NextRequest } from "next/server"
+import { after, NextResponse, type NextRequest } from "next/server"
 
 import { exactHash, perceptualHash } from "@/lib/image-hash"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { runVerification } from "@/lib/verification"
 
 const MAX_FILES = 5
 const MAX_BYTES = 10 * 1024 * 1024
@@ -161,6 +162,10 @@ export async function POST(
     submission_id: submission.id,
     event_type: "submit",
   })
+
+  // Verify after the response is sent — the fan sees "verifying" on the
+  // status page and the result lands seconds later.
+  after(() => runVerification(submission.id))
 
   return NextResponse.json({ ok: true, count: stored.length })
 }
