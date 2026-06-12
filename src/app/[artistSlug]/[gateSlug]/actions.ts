@@ -79,6 +79,46 @@ export async function startSubmissionAction(input: {
   const { ipHash, userAgent } = await hashIp()
   const proofCode = `GATE-${randomInt(1000, 10_000)}`
 
+  // Rate limits (per hour) + fraud signals for the review queue.
+  const hourAgo = new Date(Date.now() - 3600 * 1000).toISOString()
+  const fraudFlags: string[] = []
+  if (ipHash) {
+    const [{ count: gateCount }, { count: globalCount }] = await Promise.all([
+      admin
+        .from("submissions")
+        .select("id", { count: "exact", head: true })
+        .eq("gate_id", d.gateId)
+        .eq("ip_hash", ipHash)
+        .gte("created_at", hourAgo),
+      admin
+        .from("submissions")
+        .select("id", { count: "exact", head: true })
+        .eq("ip_hash", ipHash)
+        .gte("created_at", hourAgo),
+    ])
+    if ((gateCount ?? 0) >= 3 || (globalCount ?? 0) >= 15) {
+      return {
+        ok: false,
+        error: "Too many attempts from your network — try again in an hour.",
+      }
+    }
+
+    const { count: repeatIp } = await admin
+      .from("submissions")
+      .select("id", { count: "exact", head: true })
+      .eq("gate_id", d.gateId)
+      .eq("ip_hash", ipHash)
+    if ((repeatIp ?? 0) > 0) fraudFlags.push("repeat_ip")
+  }
+  if (req.email_enabled && d.email) {
+    const { count: repeatEmail } = await admin
+      .from("submissions")
+      .select("id", { count: "exact", head: true })
+      .eq("gate_id", d.gateId)
+      .eq("email", d.email)
+    if ((repeatEmail ?? 0) > 0) fraudFlags.push("repeat_email")
+  }
+
   const { data: submission, error } = await admin
     .from("submissions")
     .insert({
@@ -91,6 +131,7 @@ export async function startSubmissionAction(input: {
       decided_at: approved ? new Date().toISOString() : null,
       ip_hash: ipHash,
       user_agent: userAgent,
+      fraud_flags: fraudFlags,
     })
     .select("id, status_token")
     .single()

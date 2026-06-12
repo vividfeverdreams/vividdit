@@ -133,7 +133,7 @@ export async function runVerification(submissionId: string): Promise<void> {
   const { data: submission } = await admin
     .from("submissions")
     .select(
-      "id, gate_id, status, proof_code, email, gates(creator_id, title, artist, soundcloud_url)"
+      "id, gate_id, status, proof_code, email, fraud_flags, gates(creator_id, title, artist, soundcloud_url)"
     )
     .eq("id", submissionId)
     .maybeSingle()
@@ -296,6 +296,12 @@ export async function runVerification(submissionId: string): Promise<void> {
     } else if (o.decision === "reject" && o.confidence >= 0.8) {
       finalStatus = "rejected"
     }
+  }
+
+  // Fraud signals veto auto-approval — the creator gets the final call.
+  const flags = (submission.fraud_flags as string[]) ?? []
+  if (finalStatus === "approved" && flags.length > 0) {
+    finalStatus = "needs_review"
   }
 
   await admin.from("verification_runs").insert({

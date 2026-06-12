@@ -1,8 +1,11 @@
 import { after, NextResponse, type NextRequest } from "next/server"
 
-import { exactHash, perceptualHash } from "@/lib/image-hash"
+import { exactHash, hammingDistance, perceptualHash } from "@/lib/image-hash"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { runVerification } from "@/lib/verification"
+
+const MAX_PROOFS_PER_SUBMISSION = 15
+const NEAR_DUP_HAMMING = 8
 
 const MAX_FILES = 5
 const MAX_BYTES = 10 * 1024 * 1024
@@ -119,6 +122,51 @@ export async function POST(
       },
       { status: 409 }
     )
+  }
+
+  // Cap total proofs per submission (resubmissions accumulate).
+  const { count: existingCount } = await admin
+    .from("proof_images")
+    .select("id", { count: "exact", head: true })
+    .eq("submission_id", submission.id)
+  if ((existingCount ?? 0) + prepared.length > MAX_PROOFS_PER_SUBMISSION) {
+    return NextResponse.json(
+      { error: "Too many screenshots on this submission." },
+      { status: 429 }
+    )
+  }
+
+  // Near-duplicates of other fans' proofs on this gate aren't blocked (could
+  // be legit similar screenshots), but they flag the submission for review.
+  const { data: gateProofs } = await admin
+    .from("proof_images")
+    .select("perceptual_hash, submissions!inner(gate_id)")
+    .eq("submissions.gate_id", submission.gate_id)
+    .neq("submission_id", submission.id)
+    .not("perceptual_hash", "is", null)
+    .limit(2000)
+  const nearDup = prepared.some((p) =>
+    (gateProofs ?? []).some(
+      (g) =>
+        p.perceptual &&
+        g.perceptual_hash &&
+        hammingDistance(p.perceptual, g.perceptual_hash) <= NEAR_DUP_HAMMING
+    )
+  )
+  if (nearDup) {
+    const { data: sub } = await admin
+      .from("submissions")
+      .select("fraud_flags")
+      .eq("id", submission.id)
+      .single()
+    const flags = new Set([
+      ...(((sub?.fraud_flags as string[]) ?? []) || []),
+      "similar_screenshot",
+    ])
+    await admin
+      .from("submissions")
+      .update({ fraud_flags: [...flags] })
+      .eq("id", submission.id)
   }
 
   // Persist: storage first, then rows.

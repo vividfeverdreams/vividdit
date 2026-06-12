@@ -144,7 +144,7 @@ export default async function ReviewsPage() {
                 <span className="font-mono">{item.proof_code}</span>
                 {item.fraud_flags.length > 0 && (
                   <Badge variant="destructive" className="ml-2">
-                    fraud flags: {item.fraud_flags.length}
+                    {(item.fraud_flags as string[]).join(", ").replace(/_/g, " ")}
                   </Badge>
                 )}
               </CardDescription>
