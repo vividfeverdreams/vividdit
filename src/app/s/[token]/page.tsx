@@ -1,5 +1,7 @@
 import { notFound } from "next/navigation"
 
+import { ResubmitForm } from "@/app/s/[token]/resubmit-form"
+import { StatusEmailForm } from "@/app/s/[token]/status-email-form"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -54,7 +56,7 @@ export default async function StatusPage({
   const { data: submission } = await admin
     .from("submissions")
     .select(
-      "id, status, proof_code, created_at, gates(title, artist, gate_requirements(require_proof_code, soundcloud_enabled))"
+      "id, status, proof_code, email, created_at, gates(title, artist, gate_requirements(require_proof_code, soundcloud_enabled))"
     )
     .eq("status_token", token)
     .maybeSingle()
@@ -130,6 +132,12 @@ export default async function StatusPage({
                 {submission.proof_code}
               </span>
             </p>
+          )}
+          {submission.status === "rejected" && (
+            <ResubmitForm submissionId={submission.id} statusToken={token} />
+          )}
+          {submission.status === "needs_review" && !submission.email && (
+            <StatusEmailForm statusToken={token} />
           )}
         </CardContent>
       </Card>
