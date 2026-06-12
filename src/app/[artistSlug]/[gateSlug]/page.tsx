@@ -31,7 +31,9 @@ async function loadGate(params: Params) {
 
   const { data: requirements } = await supabase
     .from("gate_requirements")
-    .select("email_enabled, soundcloud_enabled, require_like, require_repost, require_follow")
+    .select(
+      "email_enabled, soundcloud_enabled, require_like, require_repost, require_follow, require_proof_code"
+    )
     .eq("gate_id", gate.id)
     .maybeSingle()
   if (!requirements) return null
@@ -144,6 +146,7 @@ export default async function GatePage({
           requireLike: requirements.require_like,
           requireRepost: requirements.require_repost,
           requireFollow: requirements.require_follow,
+          requireProofCode: requirements.require_proof_code,
         }}
         track={{
           title: gate.title,

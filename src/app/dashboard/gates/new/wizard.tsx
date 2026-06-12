@@ -69,6 +69,7 @@ export function GateWizard({
   const [requireLike, setRequireLike] = useState(true)
   const [requireRepost, setRequireRepost] = useState(false)
   const [requireFollow, setRequireFollow] = useState(false)
+  const [requireProofCode, setRequireProofCode] = useState(true)
 
   // Step 5 — slug + publish
   const [slug, setSlug] = useState("")
@@ -156,6 +157,7 @@ export function GateWizard({
         requireLike,
         requireRepost,
         requireFollow,
+        requireProofCode,
         asset,
         publish,
       })
@@ -389,6 +391,20 @@ export function GateWizard({
                       {label}
                     </label>
                   ))}
+                  <div className="flex items-center justify-between border-t pt-3">
+                    <div>
+                      <Label htmlFor="proofCode">Proof code</Label>
+                      <p className="text-sm text-muted-foreground">
+                        Fans paste a unique code into the comment box before
+                        screenshotting — strong anti-fake signal.
+                      </p>
+                    </div>
+                    <Switch
+                      id="proofCode"
+                      checked={requireProofCode}
+                      onCheckedChange={setRequireProofCode}
+                    />
+                  </div>
                 </div>
               )}
             </div>

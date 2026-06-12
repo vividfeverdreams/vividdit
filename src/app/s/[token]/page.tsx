@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation"
 
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import {
   Card,
   CardContent,
@@ -31,7 +32,7 @@ const STATUS_COPY: Record<string, { badge: string; title: string; body: string }
   approved: {
     badge: "Approved",
     title: "You're in!",
-    body: "Your download is unlocked. (Download delivery arrives in Phase 7.)",
+    body: "Your download is unlocked — grab the HQ file below.",
   },
   rejected: {
     badge: "Not approved",
@@ -52,12 +53,24 @@ export default async function StatusPage({
   const admin = createAdminClient()
   const { data: submission } = await admin
     .from("submissions")
-    .select("id, status, proof_code, created_at, gates(title, artist)")
+    .select(
+      "id, status, proof_code, created_at, gates(title, artist, gate_requirements(require_proof_code, soundcloud_enabled))"
+    )
     .eq("status_token", token)
     .maybeSingle()
   if (!submission) notFound()
 
-  const gate = submission.gates as unknown as { title: string; artist: string }
+  const gate = submission.gates as unknown as {
+    title: string
+    artist: string
+    gate_requirements: {
+      require_proof_code: boolean
+      soundcloud_enabled: boolean
+    } | null
+  }
+  const showProofCode =
+    !!gate.gate_requirements?.soundcloud_enabled &&
+    !!gate.gate_requirements?.require_proof_code
   const copy = STATUS_COPY[submission.status] ?? STATUS_COPY.pending
 
   // Surface the AI's explanation so rejected fans know what to fix.
@@ -101,12 +114,23 @@ export default async function StatusPage({
           {fanMessage && (
             <p className="rounded-lg border p-3 text-foreground">{fanMessage}</p>
           )}
-          <p>
-            Proof code:{" "}
-            <span className="font-mono text-foreground">
-              {submission.proof_code}
-            </span>
-          </p>
+          {submission.status === "approved" && (
+            <Button
+              render={<a href={`/download/by-status/${token}`} />}
+              nativeButton={false}
+              className="w-full"
+            >
+              Download the HQ file
+            </Button>
+          )}
+          {showProofCode && (
+            <p>
+              Proof code:{" "}
+              <span className="font-mono text-foreground">
+                {submission.proof_code}
+              </span>
+            </p>
+          )}
         </CardContent>
       </Card>
     </main>

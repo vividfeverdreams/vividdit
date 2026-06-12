@@ -58,6 +58,7 @@ const createGateSchema = z.object({
   requireLike: z.boolean(),
   requireRepost: z.boolean(),
   requireFollow: z.boolean(),
+  requireProofCode: z.boolean().default(true),
   asset: z
     .object({
       storagePath: z.string().min(1),
@@ -146,6 +147,7 @@ export async function createGateAction(
     require_like: d.soundcloudEnabled && d.requireLike,
     require_repost: d.soundcloudEnabled && d.requireRepost,
     require_follow: d.soundcloudEnabled && d.requireFollow,
+    require_proof_code: d.soundcloudEnabled && d.requireProofCode,
   })
 
   if (reqError) {

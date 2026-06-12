@@ -1,6 +1,8 @@
 import "server-only"
 
 import { getDecryptedOpenAiKey } from "@/lib/ai-keys"
+import { mintDownloadToken } from "@/lib/downloads"
+import { sendDownloadEmail } from "@/lib/email"
 import { createAdminClient } from "@/lib/supabase/admin"
 
 // AI screenshot verification. Runs server-side only, with the creator's own
@@ -67,7 +69,7 @@ function buildPrompt(ctx: {
   requireLike: boolean
   requireRepost: boolean
   requireFollow: boolean
-  proofCode: string
+  proofCode: string | null
 }): string {
   const required = [
     ctx.requireLike && "LIKE the track (red/active heart on the track page)",
@@ -88,11 +90,16 @@ Artist profile: ${ctx.artistProfileUrl ?? "unknown"}
 The fan must prove they did ALL of these on SoundCloud:
 ${required}
 
-Expected proof code: ${ctx.proofCode}
+${
+  ctx.proofCode
+    ? `Expected proof code: ${ctx.proofCode}
 Fans were asked to type this code into the track's comment box before
 screenshotting. A visible matching code is strong evidence the screenshot is
 fresh and theirs. A missing code lowers confidence but is NOT a failure on
-its own.
+its own.`
+    : `No proof code was requested for this gate — set proof_code_visible to
+false and do not penalize its absence.`
+}
 
 Evaluate the screenshot(s):
 - Are they really SoundCloud (web or app)? Wrong platform → reject.
@@ -126,7 +133,7 @@ export async function runVerification(submissionId: string): Promise<void> {
   const { data: submission } = await admin
     .from("submissions")
     .select(
-      "id, gate_id, status, proof_code, gates(creator_id, title, artist, soundcloud_url)"
+      "id, gate_id, status, proof_code, email, gates(creator_id, title, artist, soundcloud_url)"
     )
     .eq("id", submissionId)
     .maybeSingle()
@@ -143,7 +150,9 @@ export async function runVerification(submissionId: string): Promise<void> {
     await Promise.all([
       admin
         .from("gate_requirements")
-        .select("require_like, require_repost, require_follow, soundcloud_enabled")
+        .select(
+          "require_like, require_repost, require_follow, require_proof_code, soundcloud_enabled"
+        )
         .eq("gate_id", submission.gate_id)
         .single(),
       admin
@@ -173,7 +182,7 @@ export async function runVerification(submissionId: string): Promise<void> {
     requireLike: req.require_like,
     requireRepost: req.require_repost,
     requireFollow: req.require_follow,
-    proofCode: submission.proof_code,
+    proofCode: req.require_proof_code ? submission.proof_code : null,
   }
 
   const stored = await getDecryptedOpenAiKey(gate.creator_id)
@@ -321,5 +330,21 @@ export async function runVerification(submissionId: string): Promise<void> {
       submission_id: submissionId,
       event_type: finalStatus === "approved" ? "approve" : "reject",
     })
+  }
+
+  // Fans who closed the tab still get their file: email a tokenized link on
+  // auto-approve when we have an address.
+  if (finalStatus === "approved" && submission.email) {
+    try {
+      const token = await mintDownloadToken(submissionId)
+      await sendDownloadEmail({
+        to: submission.email,
+        gateTitle: gate.title,
+        artist: gate.artist,
+        downloadToken: token,
+      })
+    } catch (err) {
+      console.error("download email failed:", err)
+    }
   }
 }

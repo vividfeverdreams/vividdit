@@ -19,6 +19,7 @@ type Requirements = {
   requireLike: boolean
   requireRepost: boolean
   requireFollow: boolean
+  requireProofCode: boolean
 }
 
 type Track = {
@@ -240,31 +241,40 @@ export function UnlockPanel({
 
             <div className="space-y-2">
               <h2 className="font-medium">Step 2 — one screenshot proves it all</h2>
-              <div className="flex items-center gap-2 rounded-lg border p-3">
-                <code className="text-lg font-semibold tracking-wider">
-                  {phase.proofCode}
-                </code>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="ml-auto"
-                  onClick={() => navigator.clipboard.writeText(phase.proofCode)}
-                >
-                  Copy code
-                </Button>
-              </div>
+              {requirements.requireProofCode && (
+                <div className="flex items-center gap-2 rounded-lg border p-3">
+                  <code className="text-lg font-semibold tracking-wider">
+                    {phase.proofCode}
+                  </code>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="ml-auto"
+                    onClick={() => navigator.clipboard.writeText(phase.proofCode)}
+                  >
+                    Copy code
+                  </Button>
+                </div>
+              )}
               <p className="text-sm text-muted-foreground">
-                Paste this code into the track&apos;s <strong>comment box</strong>{" "}
-                (no need to post it!), then take <strong>one screenshot</strong>{" "}
-                of the track page showing{" "}
+                {requirements.requireProofCode && (
+                  <>
+                    Paste this code into the track&apos;s{" "}
+                    <strong>comment box</strong> (no need to post it!), then{" "}
+                  </>
+                )}
+                {requirements.requireProofCode ? "take" : "Take"}{" "}
+                <strong>one screenshot</strong> of the track page showing{" "}
                 {[
                   requirements.requireLike && "the red liked heart",
                   requirements.requireRepost && "the active repost",
                   requirements.requireFollow && "“Following” on the artist card",
                 ]
                   .filter(Boolean)
-                  .join(", ")}{" "}
-                and the code in the comment box.
+                  .join(", ")}
+                {requirements.requireProofCode &&
+                  " and the code in the comment box"}
+                .
               </p>
             </div>
 
