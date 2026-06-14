@@ -36,6 +36,9 @@ export async function POST(
     ["soundcloud", "instagram", "spotify"].includes(platformRaw)
       ? platformRaw
       : "soundcloud"
+  const ftRaw = form.get("followTargetId")
+  const followTargetId =
+    typeof ftRaw === "string" && /^[0-9a-f-]{36}$/i.test(ftRaw) ? ftRaw : null
   // Stepped flow uploads one platform at a time and finalizes after the last
   // step; legacy/resubmit callers omit the flag and verify immediately.
   const finalize = form.get("finalize") !== "false"
@@ -200,7 +203,12 @@ export async function POST(
   }
 
   const { error: rowError } = await admin.from("proof_images").insert(
-    stored.map((s) => ({ submission_id: submission.id, platform, ...s }))
+    stored.map((s) => ({
+      submission_id: submission.id,
+      platform,
+      follow_target_id: followTargetId,
+      ...s,
+    }))
   )
   if (rowError) {
     return NextResponse.json(

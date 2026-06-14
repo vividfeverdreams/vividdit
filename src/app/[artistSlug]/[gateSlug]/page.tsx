@@ -34,14 +34,18 @@ async function loadGate(params: Params) {
 
   const { data: requirements } = await supabase
     .from("gate_requirements")
-    .select(
-      "email_enabled, soundcloud_enabled, require_like, require_repost, require_follow, require_proof_code, instagram_enabled, spotify_enabled"
-    )
+    .select("email_enabled, require_like, require_repost, require_proof_code")
     .eq("gate_id", gate.id)
     .maybeSingle()
   if (!requirements) return null
 
-  return { profile, gate, requirements }
+  const { data: followTargets } = await supabase
+    .from("gate_follow_targets")
+    .select("id, platform, profile_url, display_name, sort_order")
+    .eq("gate_id", gate.id)
+    .order("sort_order", { ascending: true })
+
+  return { profile, gate, requirements, followTargets: followTargets ?? [] }
 }
 
 export async function generateMetadata({
@@ -99,7 +103,7 @@ export default async function GatePage({
   const data = await loadGate(p)
   if (!data) notFound()
 
-  const { profile, gate, requirements } = data
+  const { profile, gate, requirements, followTargets } = data
   const theme = (gate.theme ?? {}) as { accentColor?: string; artworkUrl?: string }
   const accent = theme.accentColor ?? "#18181b"
   const cover = coverUrl(gate)
@@ -152,21 +156,20 @@ export default async function GatePage({
         accent={accent}
         requirements={{
           emailEnabled: requirements.email_enabled,
-          soundcloudEnabled: requirements.soundcloud_enabled,
           requireLike: requirements.require_like,
           requireRepost: requirements.require_repost,
-          requireFollow: requirements.require_follow,
           requireProofCode: requirements.require_proof_code,
-          instagramEnabled: requirements.instagram_enabled,
-          instagramUrl: gate.instagram_url,
-          spotifyEnabled: requirements.spotify_enabled,
-          spotifyUrl: gate.spotify_url,
+          followTargets: followTargets.map((t) => ({
+            id: t.id,
+            platform: t.platform as "soundcloud" | "instagram" | "spotify",
+            profileUrl: t.profile_url,
+            displayName: t.display_name ?? t.profile_url,
+          })),
         }}
         track={{
           title: gate.title,
           artist: gate.artist,
           soundcloudUrl: gate.soundcloud_url,
-          artistProfileUrl: profile.soundcloud_profile_url,
           artistName: profile.artist_name ?? gate.artist,
         }}
         tracking={tracking}

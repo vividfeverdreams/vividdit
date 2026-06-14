@@ -26,25 +26,10 @@ type QueueItem = {
   created_at: string
   fraud_flags: unknown[]
   gateTitle: string
-  required: {
-    like: boolean
-    repost: boolean
-    follow: boolean
-    instagram: boolean
-    spotify: boolean
-    proofCode: boolean
-  }
+  decision: string | null
   outcome: VerificationOutcome | null
   runError: string | null
   images: { url: string; path: string }[]
-}
-
-function Check({ ok, label }: { ok: boolean; label: string }) {
-  return (
-    <span className={ok ? "text-foreground" : "text-destructive"}>
-      {ok ? "✓" : "✗"} {label}
-    </span>
-  )
 }
 
 export default async function ReviewsPage() {
@@ -57,7 +42,7 @@ export default async function ReviewsPage() {
   const { data: submissions } = await supabase
     .from("submissions")
     .select(
-      "id, email, proof_code, created_at, fraud_flags, gates!inner(title, creator_id, gate_requirements(require_like, require_repost, require_follow, require_proof_code, instagram_enabled, spotify_enabled))"
+      "id, email, proof_code, created_at, fraud_flags, gates!inner(title, creator_id)"
     )
     .eq("status", "needs_review")
     .eq("gates.creator_id", user.id)
@@ -66,22 +51,12 @@ export default async function ReviewsPage() {
   const admin = createAdminClient()
   const items: QueueItem[] = []
   for (const s of submissions ?? []) {
-    const gate = s.gates as unknown as {
-      title: string
-      gate_requirements: {
-        require_like: boolean
-        require_repost: boolean
-        require_follow: boolean
-        require_proof_code: boolean
-        instagram_enabled: boolean
-        spotify_enabled: boolean
-      } | null
-    }
+    const gate = s.gates as unknown as { title: string }
 
     const [{ data: run }, { data: proofs }] = await Promise.all([
       supabase
         .from("verification_runs")
-        .select("result, error")
+        .select("result, error, decision")
         .eq("submission_id", s.id)
         .order("created_at", { ascending: false })
         .limit(1)
@@ -108,14 +83,7 @@ export default async function ReviewsPage() {
       created_at: s.created_at,
       fraud_flags: (s.fraud_flags as unknown[]) ?? [],
       gateTitle: gate.title,
-      required: {
-        like: gate.gate_requirements?.require_like ?? false,
-        repost: gate.gate_requirements?.require_repost ?? false,
-        follow: gate.gate_requirements?.require_follow ?? false,
-        instagram: gate.gate_requirements?.instagram_enabled ?? false,
-        spotify: gate.gate_requirements?.spotify_enabled ?? false,
-        proofCode: gate.gate_requirements?.require_proof_code ?? false,
-      },
+      decision: run?.decision ?? null,
       outcome: (run?.result as VerificationOutcome | null) ?? null,
       runError: run?.error ?? null,
       images,
@@ -158,12 +126,7 @@ export default async function ReviewsPage() {
             <CardContent className="space-y-4">
               <div className="flex flex-wrap gap-3">
                 {item.images.map((img) => (
-                  <a
-                    key={img.path}
-                    href={img.url}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
+                  <a key={img.path} href={img.url} target="_blank" rel="noreferrer">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={img.url}
@@ -177,17 +140,7 @@ export default async function ReviewsPage() {
               {item.outcome ? (
                 <div className="space-y-2 rounded-lg border p-4 text-sm">
                   <div className="flex flex-wrap items-center gap-2">
-                    <Badge
-                      variant={
-                        item.outcome.decision === "approve"
-                          ? "default"
-                          : item.outcome.decision === "reject"
-                            ? "destructive"
-                            : "secondary"
-                      }
-                    >
-                      AI: {item.outcome.decision}
-                    </Badge>
+                    <Badge variant="secondary">AI: {item.decision ?? "review"}</Badge>
                     <span className="text-muted-foreground">
                       confidence {Math.round(item.outcome.confidence * 100)}%
                     </span>
@@ -195,39 +148,17 @@ export default async function ReviewsPage() {
                       <Badge variant="destructive">tampering suspected</Badge>
                     )}
                   </div>
-                  <div className="flex flex-wrap gap-x-4 gap-y-1">
-                    <Check ok={item.outcome.track_match} label="track" />
-                    <Check ok={item.outcome.artist_match} label="artist" />
-                    {item.required.like && (
-                      <Check ok={item.outcome.like_confirmed} label="like" />
-                    )}
-                    {item.required.repost && (
-                      <Check ok={item.outcome.repost_confirmed} label="repost" />
-                    )}
-                    {item.required.follow && (
-                      <Check ok={item.outcome.follow_confirmed} label="follow" />
-                    )}
-                    {item.required.instagram && (
-                      <Check
-                        ok={item.outcome.instagram_follow_confirmed}
-                        label="instagram"
-                      />
-                    )}
-                    {item.required.spotify && (
-                      <Check
-                        ok={item.outcome.spotify_follow_confirmed}
-                        label="spotify"
-                      />
-                    )}
-                    {item.required.proofCode && (
-                      <Check ok={item.outcome.proof_code_visible} label="code" />
-                    )}
-                  </div>
-                  {item.outcome.missing_requirements.length > 0 && (
-                    <p className="text-muted-foreground">
-                      Missing: {item.outcome.missing_requirements.join("; ")}
-                    </p>
-                  )}
+                  <ul className="space-y-1">
+                    {item.outcome.results.map((r, i) => (
+                      <li
+                        key={i}
+                        className={r.confirmed ? "text-foreground" : "text-destructive"}
+                      >
+                        {r.confirmed ? "✓" : "✗"} {r.label}
+                        {!r.confirmed && r.note ? ` — ${r.note}` : ""}
+                      </li>
+                    ))}
+                  </ul>
                   {item.outcome.fan_message && (
                     <p className="text-muted-foreground">
                       AI note to fan: “{item.outcome.fan_message}”

@@ -5,6 +5,7 @@ import { z } from "zod"
 
 import { hasValidOpenAiKey } from "@/lib/ai-keys"
 import { FREE_GATE_LIMIT } from "@/lib/limits"
+import { isHttpUrl, profileLabel } from "@/lib/profiles"
 import { resolveSoundcloudTrack, type SoundcloudTrack } from "@/lib/soundcloud"
 import { hasValidR2, presignR2Upload } from "@/lib/storage"
 import { createClient } from "@/lib/supabase/server"
@@ -82,15 +83,17 @@ const createGateSchema = z.object({
     .default("#18181b"),
   coverPath: z.string().nullable(),
   emailEnabled: z.boolean(),
-  soundcloudEnabled: z.boolean(),
   requireLike: z.boolean(),
   requireRepost: z.boolean(),
-  requireFollow: z.boolean(),
   requireProofCode: z.boolean().default(true),
-  instagramEnabled: z.boolean().default(false),
-  instagramUrl: z.string().nullable().default(null),
-  spotifyEnabled: z.boolean().default(false),
-  spotifyUrl: z.string().nullable().default(null),
+  followTargets: z
+    .array(
+      z.object({
+        platform: z.enum(["soundcloud", "instagram", "spotify"]),
+        url: z.string().trim().min(1),
+      })
+    )
+    .default([]),
   tracking: z
     .object({
       facebookPixelId: z.string().trim().max(100).nullable().default(null),
@@ -153,36 +156,15 @@ export async function createGateAction(
     }
   }
 
-  const aiGate = d.soundcloudEnabled || d.instagramEnabled || d.spotifyEnabled
+  const trackActions = d.requireLike || d.requireRepost
+  const targets = d.followTargets.filter((t) => isHttpUrl(t.url))
+  const aiGate = trackActions || targets.length > 0
 
   if (!d.emailEnabled && !aiGate) {
     return { ok: false, error: "Enable at least one unlock requirement." }
   }
-  if (
-    d.soundcloudEnabled &&
-    !d.requireLike &&
-    !d.requireRepost &&
-    !d.requireFollow
-  ) {
-    return {
-      ok: false,
-      error: "Pick at least one SoundCloud action (like, repost, or follow).",
-    }
-  }
-  const isUrl = (v: string | null) => {
-    if (!v) return false
-    try {
-      new URL(v)
-      return true
-    } catch {
-      return false
-    }
-  }
-  if (d.instagramEnabled && !isUrl(d.instagramUrl)) {
-    return { ok: false, error: "Add the Instagram profile URL to follow." }
-  }
-  if (d.spotifyEnabled && !isUrl(d.spotifyUrl)) {
-    return { ok: false, error: "Add the Spotify profile URL to follow." }
+  if (d.followTargets.some((t) => !isHttpUrl(t.url))) {
+    return { ok: false, error: "Every follow profile needs a valid URL." }
   }
 
   if (d.publish) {
@@ -205,8 +187,6 @@ export async function createGateAction(
       title: d.title,
       artist: d.artist,
       soundcloud_url: d.soundcloudUrl,
-      instagram_url: d.instagramEnabled ? d.instagramUrl : null,
-      spotify_url: d.spotifyEnabled ? d.spotifyUrl : null,
       slug: d.slug,
       status: d.publish ? "published" : "draft",
       cover_path: d.coverPath,
@@ -228,21 +208,42 @@ export async function createGateAction(
     return { ok: false, error: "Couldn't create the gate. Try again." }
   }
 
+  const hasSc = targets.some((t) => t.platform === "soundcloud")
   const { error: reqError } = await supabase.from("gate_requirements").insert({
     gate_id: gate.id,
     email_enabled: d.emailEnabled,
-    soundcloud_enabled: d.soundcloudEnabled,
-    require_like: d.soundcloudEnabled && d.requireLike,
-    require_repost: d.soundcloudEnabled && d.requireRepost,
-    require_follow: d.soundcloudEnabled && d.requireFollow,
-    require_proof_code: d.soundcloudEnabled && d.requireProofCode,
-    instagram_enabled: d.instagramEnabled,
-    spotify_enabled: d.spotifyEnabled,
+    // Legacy columns kept consistent for constraints; follows now live in
+    // gate_follow_targets.
+    soundcloud_enabled: trackActions || hasSc,
+    require_like: d.requireLike,
+    require_repost: d.requireRepost,
+    require_follow: hasSc,
+    require_proof_code: trackActions && d.requireProofCode,
+    instagram_enabled: targets.some((t) => t.platform === "instagram"),
+    spotify_enabled: targets.some((t) => t.platform === "spotify"),
   })
 
   if (reqError) {
     await supabase.from("gates").delete().eq("id", gate.id)
     return { ok: false, error: "Couldn't save unlock requirements. Try again." }
+  }
+
+  if (targets.length > 0) {
+    const { error: targetError } = await supabase
+      .from("gate_follow_targets")
+      .insert(
+        targets.map((t, i) => ({
+          gate_id: gate.id,
+          platform: t.platform,
+          profile_url: t.url,
+          display_name: profileLabel(t.platform, t.url),
+          sort_order: i,
+        }))
+      )
+    if (targetError) {
+      await supabase.from("gates").delete().eq("id", gate.id)
+      return { ok: false, error: "Couldn't save follow profiles. Try again." }
+    }
   }
 
   if (d.asset) {

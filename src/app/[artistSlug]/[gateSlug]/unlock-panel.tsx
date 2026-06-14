@@ -18,24 +18,31 @@ import { fireDownloadConversion, type GateTracking } from "@/lib/tracking"
 const MAX_BYTES = 10 * 1024 * 1024
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"]
 
+const PLATFORM_LABEL: Record<string, string> = {
+  soundcloud: "SoundCloud",
+  instagram: "Instagram",
+  spotify: "Spotify",
+}
+
+export type FollowTarget = {
+  id: string
+  platform: "soundcloud" | "instagram" | "spotify"
+  profileUrl: string
+  displayName: string
+}
+
 type Requirements = {
   emailEnabled: boolean
-  soundcloudEnabled: boolean
   requireLike: boolean
   requireRepost: boolean
-  requireFollow: boolean
   requireProofCode: boolean
-  instagramEnabled: boolean
-  instagramUrl: string | null
-  spotifyEnabled: boolean
-  spotifyUrl: string | null
+  followTargets: FollowTarget[]
 }
 
 type Track = {
   title: string
   artist: string
   soundcloudUrl: string
-  artistProfileUrl: string | null
   artistName: string
 }
 
@@ -45,7 +52,10 @@ type Submission = {
   proofCode: string
 }
 
-type StepKind = "email" | "soundcloud" | "instagram" | "spotify"
+type Step =
+  | { kind: "email" }
+  | { kind: "track" }
+  | { kind: "follow"; target: FollowTarget }
 
 export function UnlockPanel({
   gateId,
@@ -60,12 +70,13 @@ export function UnlockPanel({
   track: Track
   tracking: GateTracking
 }) {
-  const steps = useMemo<StepKind[]>(() => {
-    const s: StepKind[] = []
-    if (requirements.emailEnabled) s.push("email")
-    if (requirements.soundcloudEnabled) s.push("soundcloud")
-    if (requirements.instagramEnabled) s.push("instagram")
-    if (requirements.spotifyEnabled) s.push("spotify")
+  const steps = useMemo<Step[]>(() => {
+    const s: Step[] = []
+    if (requirements.emailEnabled) s.push({ kind: "email" })
+    if (requirements.requireLike || requirements.requireRepost)
+      s.push({ kind: "track" })
+    for (const target of requirements.followTargets)
+      s.push({ kind: "follow", target })
     return s
   }, [requirements])
 
@@ -76,18 +87,13 @@ export function UnlockPanel({
   const [file, setFile] = useState<File | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  // null = stepping; otherwise the terminal/verifying state.
   const [outcome, setOutcome] = useState<
     null | "verifying" | "approved" | "rejected" | "needs_review"
   >(null)
 
   const done = stepIndex >= steps.length
-  const progress = outcome
-    ? 100
-    : Math.round((stepIndex / steps.length) * 100)
+  const progress = outcome ? 100 : Math.round((stepIndex / steps.length) * 100)
 
-  // Fire the download conversion once, when the fan is approved. No-ops on
-  // pixels the fan didn't consent to (those globals won't exist).
   useEffect(() => {
     if (outcome === "approved") fireDownloadConversion(tracking)
   }, [outcome, tracking])
@@ -121,15 +127,20 @@ export function UnlockPanel({
       if (status === "rejected") return setOutcome("rejected")
       if (status === "needs_review") return setOutcome("needs_review")
     }
-    // Still verifying after ~30s — let the fan check their status page.
     setOutcome("needs_review")
   }
 
-  const uploadProof = async (sub: Submission, platform: StepKind, isLast: boolean) => {
+  const uploadProof = async (
+    sub: Submission,
+    platform: string,
+    followTargetId: string | null,
+    isLast: boolean
+  ) => {
     const form = new FormData()
     form.set("statusToken", sub.statusToken)
     form.set("platform", platform)
     form.set("finalize", "false")
+    if (followTargetId) form.set("followTargetId", followTargetId)
     form.append("proofs", file!)
     const res = await fetch(`/api/submissions/${sub.submissionId}/proofs`, {
       method: "POST",
@@ -164,15 +175,17 @@ export function UnlockPanel({
     try {
       const sub = await ensureSubmission()
       if (!sub) return
-      // Email-only gate → approved immediately inside ensureSubmission.
-      if (steps.length === 1) return
+      if (steps.length === 1) return // email-only → approved
       advance()
     } finally {
       setBusy(false)
     }
   }
 
-  const handleSocialStep = async (platform: StepKind) => {
+  const handleProofStep = async (
+    platform: string,
+    followTargetId: string | null
+  ) => {
     setError(null)
     if (!file) return setError("Upload a screenshot to continue.")
     if (!ALLOWED_TYPES.includes(file.type))
@@ -184,8 +197,7 @@ export function UnlockPanel({
       const sub = await ensureSubmission()
       if (!sub) return
       const isLast = stepIndex === steps.length - 1
-      const ok = await uploadProof(sub, platform, isLast)
-      if (ok) advance()
+      if (await uploadProof(sub, platform, followTargetId, isLast)) advance()
     } finally {
       setBusy(false)
     }
@@ -199,12 +211,11 @@ export function UnlockPanel({
     )
   }
 
-  const currentStep = steps[stepIndex]
+  const current = steps[stepIndex]
 
   return (
     <Card>
       <CardContent className="space-y-5 pt-6">
-        {/* Progress */}
         <div className="space-y-1">
           <Progress value={progress} />
           <p className="text-xs text-muted-foreground">
@@ -222,7 +233,6 @@ export function UnlockPanel({
           </Alert>
         )}
 
-        {/* Terminal / verifying states */}
         {outcome === "verifying" && (
           <div className="space-y-2 text-center">
             <h2 className="text-lg font-semibold">Checking your proof…</h2>
@@ -267,8 +277,7 @@ export function UnlockPanel({
           </div>
         )}
 
-        {/* Active step */}
-        {!outcome && !done && currentStep === "email" && (
+        {!outcome && !done && current?.kind === "email" && (
           <div className="space-y-4">
             <div>
               <h2 className="font-medium">Join {track.artistName}&apos;s email list</h2>
@@ -307,7 +316,7 @@ export function UnlockPanel({
           </div>
         )}
 
-        {!outcome && !done && currentStep === "soundcloud" && (
+        {!outcome && !done && current?.kind === "track" && (
           <div className="space-y-4">
             <div>
               <h2 className="font-medium">On SoundCloud</h2>
@@ -321,9 +330,6 @@ export function UnlockPanel({
               <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
                 {requirements.requireLike && <li>♥ Tap Like (the heart)</li>}
                 {requirements.requireRepost && <li>⟳ Tap Repost</li>}
-                {requirements.requireFollow && (
-                  <li>+ Follow {track.artistName}</li>
-                )}
               </ul>
             </div>
             {requirements.requireProofCode && submission && (
@@ -354,7 +360,7 @@ export function UnlockPanel({
               file={file}
             />
             <Button
-              onClick={() => handleSocialStep("soundcloud")}
+              onClick={() => handleProofStep("soundcloud", null)}
               disabled={busy || !file}
               className="w-full"
               style={{ backgroundColor: accent }}
@@ -364,32 +370,41 @@ export function UnlockPanel({
           </div>
         )}
 
-        {!outcome && !done && currentStep === "instagram" && (
-          <SocialFollowStep
-            platform="Instagram"
-            artistName={track.artistName}
-            url={requirements.instagramUrl!}
-            accent={accent}
-            file={file}
-            onPick={setFile}
-            busy={busy}
-            onOpen={openProfile}
-            onContinue={() => handleSocialStep("instagram")}
-          />
-        )}
-
-        {!outcome && !done && currentStep === "spotify" && (
-          <SocialFollowStep
-            platform="Spotify"
-            artistName={track.artistName}
-            url={requirements.spotifyUrl!}
-            accent={accent}
-            file={file}
-            onPick={setFile}
-            busy={busy}
-            onOpen={openProfile}
-            onContinue={() => handleSocialStep("spotify")}
-          />
+        {!outcome && !done && current?.kind === "follow" && (
+          <div className="space-y-4">
+            <div>
+              <h2 className="font-medium">
+                Follow {current.target.displayName} on{" "}
+                {PLATFORM_LABEL[current.target.platform]}
+              </h2>
+              <Button
+                onClick={() => openProfile(current.target.profileUrl)}
+                className="mt-2 w-full"
+                style={{ backgroundColor: accent }}
+              >
+                Open {PLATFORM_LABEL[current.target.platform]} ↗
+              </Button>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Tap <strong>Follow</strong>, then screenshot the profile showing
+                “Following”.
+              </p>
+            </div>
+            <ProofUpload
+              label={`Screenshot showing you follow ${current.target.displayName}`}
+              onPick={setFile}
+              file={file}
+            />
+            <Button
+              onClick={() =>
+                handleProofStep(current.target.platform, current.target.id)
+              }
+              disabled={busy || !file}
+              className="w-full"
+              style={{ backgroundColor: accent }}
+            >
+              {busy ? "Uploading…" : "Continue"}
+            </Button>
+          </div>
         )}
       </CardContent>
     </Card>
@@ -417,60 +432,6 @@ function ProofUpload({
       />
       {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
       {file && <p className="text-xs text-muted-foreground">✓ {file.name}</p>}
-    </div>
-  )
-}
-
-function SocialFollowStep({
-  platform,
-  artistName,
-  url,
-  accent,
-  file,
-  onPick,
-  busy,
-  onOpen,
-  onContinue,
-}: {
-  platform: string
-  artistName: string
-  url: string
-  accent: string
-  file: File | null
-  onPick: (f: File | null) => void
-  busy: boolean
-  onOpen: (url: string) => void
-  onContinue: () => void
-}) {
-  return (
-    <div className="space-y-4">
-      <div>
-        <h2 className="font-medium">Follow {artistName} on {platform}</h2>
-        <Button
-          onClick={() => onOpen(url)}
-          className="mt-2 w-full"
-          style={{ backgroundColor: accent }}
-        >
-          Open {platform} ↗
-        </Button>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Tap <strong>Follow</strong>, then screenshot the profile showing
-          “Following”.
-        </p>
-      </div>
-      <ProofUpload
-        label={`Screenshot of the ${platform} profile showing "Following"`}
-        file={file}
-        onPick={onPick}
-      />
-      <Button
-        onClick={onContinue}
-        disabled={busy || !file}
-        className="w-full"
-        style={{ backgroundColor: accent }}
-      >
-        {busy ? "Uploading…" : "Continue"}
-      </Button>
     </div>
   )
 }

@@ -76,15 +76,20 @@ export function GateWizard({
 
   // Step 4 — unlock requirements
   const [emailEnabled, setEmailEnabled] = useState(true)
-  const [scEnabled, setScEnabled] = useState(false)
-  const [requireLike, setRequireLike] = useState(true)
+  const [requireLike, setRequireLike] = useState(false)
   const [requireRepost, setRequireRepost] = useState(false)
-  const [requireFollow, setRequireFollow] = useState(false)
   const [requireProofCode, setRequireProofCode] = useState(true)
-  const [igEnabled, setIgEnabled] = useState(false)
-  const [igUrl, setIgUrl] = useState("")
-  const [spotifyEnabled, setSpotifyEnabled] = useState(false)
-  const [spotifyUrl, setSpotifyUrl] = useState("")
+  // Multiple follow profiles per platform (each becomes a fan step).
+  const [scFollows, setScFollows] = useState<string[]>([])
+  const [igFollows, setIgFollows] = useState<string[]>([])
+  const [spFollows, setSpFollows] = useState<string[]>([])
+
+  const trackActions = requireLike || requireRepost
+  const allFollows = [
+    ...scFollows.map((url) => ({ platform: "soundcloud" as const, url })),
+    ...igFollows.map((url) => ({ platform: "instagram" as const, url })),
+    ...spFollows.map((url) => ({ platform: "spotify" as const, url })),
+  ].filter((t) => t.url.trim())
 
   // Step 5 — slug + publish
   const [slug, setSlug] = useState("")
@@ -184,15 +189,10 @@ export function GateWizard({
         accentColor,
         coverPath,
         emailEnabled,
-        soundcloudEnabled: scEnabled,
         requireLike,
         requireRepost,
-        requireFollow,
         requireProofCode,
-        instagramEnabled: igEnabled,
-        instagramUrl: igUrl.trim() || null,
-        spotifyEnabled: spotifyEnabled,
-        spotifyUrl: spotifyUrl.trim() || null,
+        followTargets: allFollows,
         tracking: {
           facebookPixelId: fbPixel.trim() || null,
           googleAdsTagId: googleTag.trim() || null,
@@ -216,14 +216,8 @@ export function GateWizard({
     if (s === 0 && !track) return "Fetch your track first."
     if (s === 0 && track && (!track.title || !track.artist))
       return "Fill in the track title and artist."
-    if (s === 3 && !emailEnabled && !scEnabled && !igEnabled && !spotifyEnabled)
+    if (s === 3 && !emailEnabled && !trackActions && allFollows.length === 0)
       return "Enable at least one unlock requirement."
-    if (s === 3 && scEnabled && !requireLike && !requireRepost && !requireFollow)
-      return "Pick at least one SoundCloud action."
-    if (s === 3 && igEnabled && !igUrl.trim())
-      return "Add the Instagram profile URL."
-    if (s === 3 && spotifyEnabled && !spotifyUrl.trim())
-      return "Add the Spotify profile URL."
     return null
   }
 
@@ -457,44 +451,37 @@ export function GateWizard({
                   onCheckedChange={setEmailEnabled}
                 />
               </div>
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label htmlFor="scGate">SoundCloud gate</Label>
-                  <p className="text-sm text-muted-foreground">
-                    Fans prove like/repost/follow with screenshots, verified by AI.
-                  </p>
-                </div>
-                <Switch id="scGate" checked={scEnabled} onCheckedChange={setScEnabled} />
-              </div>
-              {scEnabled && (
-                <div className="space-y-3 rounded-lg border p-4">
-                  {!hasValidKey && (
-                    <Alert variant="destructive">
-                      <AlertDescription>
-                        You need a valid OpenAI key to publish a SoundCloud gate.{" "}
-                        <Link href="/dashboard/settings" className="underline">
-                          Add one in Settings.
-                        </Link>
-                      </AlertDescription>
-                    </Alert>
-                  )}
-                  {(
-                    [
-                      ["Like the track", requireLike, setRequireLike],
-                      ["Repost the track", requireRepost, setRequireRepost],
-                      ["Follow you on SoundCloud", requireFollow, setRequireFollow],
-                    ] as const
-                  ).map(([label, checked, set]) => (
-                    <label key={label} className="flex items-center gap-3 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={(e) => set(e.target.checked)}
-                        className="size-4"
-                      />
-                      {label}
-                    </label>
-                  ))}
+
+              {(trackActions || allFollows.length > 0) && !hasValidKey && (
+                <Alert variant="destructive">
+                  <AlertDescription>
+                    Follow/like/repost gates need a valid OpenAI key to publish.{" "}
+                    <Link href="/dashboard/settings" className="underline">
+                      Add one in Settings.
+                    </Link>
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              <div className="space-y-3 rounded-lg border p-4">
+                <p className="text-sm font-medium">SoundCloud track actions</p>
+                {(
+                  [
+                    ["Like the track", requireLike, setRequireLike],
+                    ["Repost the track", requireRepost, setRequireRepost],
+                  ] as const
+                ).map(([label, checked, set]) => (
+                  <label key={label} className="flex items-center gap-3 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={(e) => set(e.target.checked)}
+                      className="size-4"
+                    />
+                    {label}
+                  </label>
+                ))}
+                {trackActions && (
                   <div className="flex items-center justify-between border-t pt-3">
                     <div>
                       <Label htmlFor="proofCode">Proof code</Label>
@@ -509,78 +496,34 @@ export function GateWizard({
                       onCheckedChange={setRequireProofCode}
                     />
                   </div>
-                </div>
-              )}
+                )}
+              </div>
 
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label htmlFor="igGate">Instagram follow gate</Label>
-                  <p className="text-sm text-muted-foreground">
-                    Fans prove they follow you on Instagram, verified by AI.
-                  </p>
-                </div>
-                <Switch
-                  id="igGate"
-                  checked={igEnabled}
-                  onCheckedChange={setIgEnabled}
+              <div className="space-y-4 rounded-lg border p-4">
+                <p className="text-sm font-medium">Follow profiles</p>
+                <p className="text-xs text-muted-foreground">
+                  Add as many as you need — e.g. each featured artist. Every
+                  profile becomes its own step for the fan.
+                </p>
+                <FollowList
+                  label="SoundCloud profiles to follow"
+                  urls={scFollows}
+                  onChange={setScFollows}
+                  placeholder="https://soundcloud.com/artist"
+                />
+                <FollowList
+                  label="Instagram profiles to follow"
+                  urls={igFollows}
+                  onChange={setIgFollows}
+                  placeholder="https://instagram.com/handle"
+                />
+                <FollowList
+                  label="Spotify profiles to follow"
+                  urls={spFollows}
+                  onChange={setSpFollows}
+                  placeholder="https://open.spotify.com/artist/…"
                 />
               </div>
-              {igEnabled && (
-                <div className="space-y-2 rounded-lg border p-4">
-                  {!hasValidKey && (
-                    <Alert variant="destructive">
-                      <AlertDescription>
-                        You need a valid OpenAI key to publish a follow gate.{" "}
-                        <Link href="/dashboard/settings" className="underline">
-                          Add one in Settings.
-                        </Link>
-                      </AlertDescription>
-                    </Alert>
-                  )}
-                  <Label htmlFor="igUrl">Instagram profile URL</Label>
-                  <Input
-                    id="igUrl"
-                    value={igUrl}
-                    onChange={(e) => setIgUrl(e.target.value)}
-                    placeholder="https://instagram.com/yourhandle"
-                  />
-                </div>
-              )}
-
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label htmlFor="spGate">Spotify follow gate</Label>
-                  <p className="text-sm text-muted-foreground">
-                    Fans prove they follow you on Spotify, verified by AI.
-                  </p>
-                </div>
-                <Switch
-                  id="spGate"
-                  checked={spotifyEnabled}
-                  onCheckedChange={setSpotifyEnabled}
-                />
-              </div>
-              {spotifyEnabled && (
-                <div className="space-y-2 rounded-lg border p-4">
-                  {!hasValidKey && (
-                    <Alert variant="destructive">
-                      <AlertDescription>
-                        You need a valid OpenAI key to publish a follow gate.{" "}
-                        <Link href="/dashboard/settings" className="underline">
-                          Add one in Settings.
-                        </Link>
-                      </AlertDescription>
-                    </Alert>
-                  )}
-                  <Label htmlFor="spUrl">Spotify artist/profile URL</Label>
-                  <Input
-                    id="spUrl"
-                    value={spotifyUrl}
-                    onChange={(e) => setSpotifyUrl(e.target.value)}
-                    placeholder="https://open.spotify.com/artist/…"
-                  />
-                </div>
-              )}
             </div>
           )}
 
@@ -626,19 +569,13 @@ export function GateWizard({
                   Unlock:{" "}
                   {[
                     emailEnabled && "email",
-                    scEnabled &&
-                      `SoundCloud (${[
-                        requireLike && "like",
-                        requireRepost && "repost",
-                        requireFollow && "follow",
-                      ]
-                        .filter(Boolean)
-                        .join(", ")})`,
-                    igEnabled && "Instagram follow",
-                    spotifyEnabled && "Spotify follow",
+                    requireLike && "like",
+                    requireRepost && "repost",
+                    allFollows.length > 0 &&
+                      `${allFollows.length} follow${allFollows.length > 1 ? "s" : ""}`,
                   ]
                     .filter(Boolean)
-                    .join(" + ")}
+                    .join(" + ") || "nothing yet"}
                 </p>
               </div>
             </div>
@@ -674,6 +611,53 @@ export function GateWizard({
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+function FollowList({
+  label,
+  urls,
+  onChange,
+  placeholder,
+}: {
+  label: string
+  urls: string[]
+  onChange: (urls: string[]) => void
+  placeholder: string
+}) {
+  return (
+    <div className="space-y-2">
+      <Label>{label}</Label>
+      {urls.map((u, i) => (
+        <div key={i} className="flex gap-2">
+          <Input
+            value={u}
+            onChange={(e) => {
+              const next = [...urls]
+              next[i] = e.target.value
+              onChange(next)
+            }}
+            placeholder={placeholder}
+          />
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => onChange(urls.filter((_, j) => j !== i))}
+          >
+            ✕
+          </Button>
+        </div>
+      ))}
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={() => onChange([...urls, ""])}
+      >
+        + Add profile
+      </Button>
     </div>
   )
 }
