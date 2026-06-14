@@ -2,6 +2,7 @@ import type { Metadata } from "next"
 import { headers } from "next/headers"
 import { notFound } from "next/navigation"
 
+import { TrackingPixels } from "@/app/[artistSlug]/[gateSlug]/tracking-pixels"
 import { UnlockPanel } from "@/app/[artistSlug]/[gateSlug]/unlock-panel"
 import { soundcloudPlayerSrc } from "@/lib/soundcloud"
 import { createAdminClient } from "@/lib/supabase/admin"
@@ -23,7 +24,7 @@ async function loadGate(params: Params) {
   const { data: gate } = await supabase
     .from("gates")
     .select(
-      "id, title, artist, soundcloud_url, instagram_url, spotify_url, slug, status, theme, cover_path"
+      "id, title, artist, soundcloud_url, instagram_url, spotify_url, slug, status, theme, cover_path, tracking"
     )
     .eq("creator_id", profile.id)
     .eq("slug", params.gateSlug)
@@ -102,6 +103,13 @@ export default async function GatePage({
   const theme = (gate.theme ?? {}) as { accentColor?: string; artworkUrl?: string }
   const accent = theme.accentColor ?? "#18181b"
   const cover = coverUrl(gate)
+  const tracking = {
+    facebookPixelId: null,
+    googleAdsTagId: null,
+    googleConversionLabel: null,
+    tiktokPixelId: null,
+    ...((gate.tracking ?? {}) as Record<string, string | null>),
+  }
 
   const headerList = await headers()
   await recordViewEvent(gate.id, sp, headerList.get("referer"))
@@ -161,11 +169,14 @@ export default async function GatePage({
           artistProfileUrl: profile.soundcloud_profile_url,
           artistName: profile.artist_name ?? gate.artist,
         }}
+        tracking={tracking}
       />
 
       <footer className="mt-auto pt-8 text-center text-xs text-muted-foreground">
         Powered by Vividdit
       </footer>
+
+      <TrackingPixels tracking={tracking} accent={accent} />
     </main>
   )
 }

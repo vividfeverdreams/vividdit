@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 
 import {
   finalizeSubmissionAction,
@@ -13,6 +13,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Progress } from "@/components/ui/progress"
+import { fireDownloadConversion, type GateTracking } from "@/lib/tracking"
 
 const MAX_BYTES = 10 * 1024 * 1024
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"]
@@ -51,11 +52,13 @@ export function UnlockPanel({
   accent,
   requirements,
   track,
+  tracking,
 }: {
   gateId: string
   accent: string
   requirements: Requirements
   track: Track
+  tracking: GateTracking
 }) {
   const steps = useMemo<StepKind[]>(() => {
     const s: StepKind[] = []
@@ -82,6 +85,12 @@ export function UnlockPanel({
   const progress = outcome
     ? 100
     : Math.round((stepIndex / steps.length) * 100)
+
+  // Fire the download conversion once, when the fan is approved. No-ops on
+  // pixels the fan didn't consent to (those globals won't exist).
+  useEffect(() => {
+    if (outcome === "approved") fireDownloadConversion(tracking)
+  }, [outcome, tracking])
 
   const ensureSubmission = async (): Promise<Submission | null> => {
     if (submission) return submission

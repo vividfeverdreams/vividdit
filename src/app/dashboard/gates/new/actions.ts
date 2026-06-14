@@ -91,6 +91,19 @@ const createGateSchema = z.object({
   instagramUrl: z.string().nullable().default(null),
   spotifyEnabled: z.boolean().default(false),
   spotifyUrl: z.string().nullable().default(null),
+  tracking: z
+    .object({
+      facebookPixelId: z.string().trim().max(100).nullable().default(null),
+      googleAdsTagId: z.string().trim().max(100).nullable().default(null),
+      googleConversionLabel: z.string().trim().max(120).nullable().default(null),
+      tiktokPixelId: z.string().trim().max(100).nullable().default(null),
+    })
+    .default({
+      facebookPixelId: null,
+      googleAdsTagId: null,
+      googleConversionLabel: null,
+      tiktokPixelId: null,
+    }),
   asset: z
     .object({
       storagePath: z.string().min(1),
@@ -198,6 +211,12 @@ export async function createGateAction(
       status: d.publish ? "published" : "draft",
       cover_path: d.coverPath,
       theme: { accentColor: d.accentColor, artworkUrl: d.artworkUrl },
+      tracking: {
+        facebookPixelId: d.tracking.facebookPixelId,
+        googleAdsTagId: d.tracking.googleAdsTagId,
+        googleConversionLabel: d.tracking.googleConversionLabel,
+        tiktokPixelId: d.tracking.tiktokPixelId,
+      },
     })
     .select("id")
     .single()

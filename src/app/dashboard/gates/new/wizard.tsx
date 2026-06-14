@@ -67,6 +67,13 @@ export function GateWizard({
   const [coverPath, setCoverPath] = useState<string | null>(null)
   const [coverUploading, setCoverUploading] = useState(false)
 
+  // Step 3 — tracking pixels (optional)
+  const [showTracking, setShowTracking] = useState(false)
+  const [fbPixel, setFbPixel] = useState("")
+  const [googleTag, setGoogleTag] = useState("")
+  const [googleLabel, setGoogleLabel] = useState("")
+  const [tiktokPixel, setTiktokPixel] = useState("")
+
   // Step 4 — unlock requirements
   const [emailEnabled, setEmailEnabled] = useState(true)
   const [scEnabled, setScEnabled] = useState(false)
@@ -186,6 +193,12 @@ export function GateWizard({
         instagramUrl: igUrl.trim() || null,
         spotifyEnabled: spotifyEnabled,
         spotifyUrl: spotifyUrl.trim() || null,
+        tracking: {
+          facebookPixelId: fbPixel.trim() || null,
+          googleAdsTagId: googleTag.trim() || null,
+          googleConversionLabel: googleLabel.trim() || null,
+          tiktokPixelId: tiktokPixel.trim() || null,
+        },
         asset,
         publish,
       })
@@ -366,6 +379,65 @@ export function GateWizard({
                     ? "✓ Custom cover uploaded."
                     : "Defaults to your SoundCloud artwork."}
                 </p>
+              </div>
+
+              <div className="space-y-3 border-t pt-4">
+                <button
+                  type="button"
+                  onClick={() => setShowTracking((v) => !v)}
+                  className="text-sm text-muted-foreground underline underline-offset-4"
+                >
+                  {showTracking
+                    ? "Hide ad tracking pixels"
+                    : "Add ad tracking pixels (optional)"}
+                </button>
+                {showTracking && (
+                  <div className="space-y-4">
+                    <p className="text-xs text-muted-foreground">
+                      Track visits and downloads in your own ad accounts for
+                      retargeting. Fans see a consent notice; pixels only load
+                      after they accept.
+                    </p>
+                    <div className="space-y-2">
+                      <Label htmlFor="fbPixel">Facebook Pixel ID</Label>
+                      <Input
+                        id="fbPixel"
+                        value={fbPixel}
+                        onChange={(e) => setFbPixel(e.target.value)}
+                        placeholder="e.g. 123456789012345"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="googleTag">Google Ads tag ID</Label>
+                      <Input
+                        id="googleTag"
+                        value={googleTag}
+                        onChange={(e) => setGoogleTag(e.target.value)}
+                        placeholder="AW-XXXXXXXXX"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="googleLabel">
+                        Google Ads conversion label (download)
+                      </Label>
+                      <Input
+                        id="googleLabel"
+                        value={googleLabel}
+                        onChange={(e) => setGoogleLabel(e.target.value)}
+                        placeholder="Conversion label"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="tiktokPixel">TikTok Pixel ID</Label>
+                      <Input
+                        id="tiktokPixel"
+                        value={tiktokPixel}
+                        onChange={(e) => setTiktokPixel(e.target.value)}
+                        placeholder="e.g. C9XXXXXXXXXXXXXXXXXX"
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
