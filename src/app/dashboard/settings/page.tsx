@@ -2,8 +2,10 @@ import { redirect } from "next/navigation"
 
 import { OpenAiKeySection } from "@/app/dashboard/settings/openai-key-section"
 import { ProfileSection } from "@/app/dashboard/settings/profile-section"
+import { ResendKeySection } from "@/app/dashboard/settings/resend-key-section"
 import { Separator } from "@/components/ui/separator"
 import { getAiKeyInfo, VERIFICATION_MODELS } from "@/lib/ai-keys"
+import { getEmailKeyInfo } from "@/lib/email-keys"
 import { createClient } from "@/lib/supabase/server"
 
 export const metadata = { title: "Settings" }
@@ -17,13 +19,14 @@ export default async function SettingsPage() {
     redirect("/login")
   }
 
-  const [{ data: profile }, keyInfo] = await Promise.all([
+  const [{ data: profile }, keyInfo, emailKeyInfo] = await Promise.all([
     supabase
       .from("profiles")
       .select("artist_name, artist_slug, soundcloud_profile_url")
       .eq("id", user.id)
       .single(),
     getAiKeyInfo(user.id),
+    getEmailKeyInfo(user.id),
   ])
 
   return (
@@ -38,6 +41,8 @@ export default async function SettingsPage() {
       />
       <Separator />
       <OpenAiKeySection keyInfo={keyInfo} models={VERIFICATION_MODELS} />
+      <Separator />
+      <ResendKeySection keyInfo={emailKeyInfo} />
     </div>
   )
 }

@@ -46,11 +46,16 @@ export async function approveSubmissionAction(formData: FormData) {
     event_type: "approve",
   })
 
-  const gate = submission.gates as unknown as { title: string; artist: string }
+  const gate = submission.gates as unknown as {
+    title: string
+    artist: string
+    creator_id: string
+  }
   if (submission.email) {
     try {
       const token = await mintDownloadToken(submissionId)
       await sendDownloadEmail({
+        creatorId: gate.creator_id,
         to: submission.email,
         gateTitle: gate.title,
         artist: gate.artist,
@@ -88,6 +93,7 @@ export async function rejectSubmissionAction(formData: FormData) {
     title: string
     artist: string
     slug: string
+    creator_id: string
     profiles: { artist_slug: string } | null
   }
   if (submission.email) {
@@ -104,6 +110,7 @@ export async function rejectSubmissionAction(formData: FormData) {
       (run?.result as { fan_message?: string } | null)?.fan_message ?? null
     try {
       await sendRejectionEmail({
+        creatorId: gate.creator_id,
         to: submission.email,
         gateTitle: gate.title,
         artist: gate.artist,

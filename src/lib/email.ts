@@ -1,21 +1,23 @@
 import "server-only"
 
-// Fan-facing transactional email via Resend. Without RESEND_API_KEY (local
-// dev), emails are logged to the server console instead of sent.
+import { getDecryptedResendKey } from "@/lib/email-keys"
 
-type EmailInput = {
+// Fan-facing transactional email is sent on the CREATOR's own Resend key
+// (BYOK) — the platform key is never billed for an artist's fans. If a creator
+// hasn't configured Resend, the email is skipped (logged) and the fan relies
+// on their durable status-page download link.
+
+type EmailBody = {
   to: string
   subject: string
   html: string
 }
 
-async function sendEmail(input: EmailInput): Promise<void> {
-  const apiKey = process.env.RESEND_API_KEY
-  const from = process.env.EMAIL_FROM ?? "Vividdit <noreply@vividdit.com>"
-
-  if (!apiKey) {
+async function sendAsCreator(creatorId: string, body: EmailBody): Promise<void> {
+  const creds = await getDecryptedResendKey(creatorId)
+  if (!creds) {
     console.log(
-      `[email:dev] to=${input.to} subject="${input.subject}"\n${input.html}`
+      `[email:skip] creator ${creatorId} has no Resend key — not sending "${body.subject}" to ${body.to}`
     )
     return
   }
@@ -23,19 +25,20 @@ async function sendEmail(input: EmailInput): Promise<void> {
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${apiKey}`,
+      Authorization: `Bearer ${creds.key}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ from, ...input }),
+    body: JSON.stringify({ from: creds.from, ...body }),
     signal: AbortSignal.timeout(15_000),
   })
   if (!res.ok) {
-    const body = await res.text().catch(() => "")
-    throw new Error(`Resend failed (${res.status}): ${body.slice(0, 200)}`)
+    const text = await res.text().catch(() => "")
+    throw new Error(`Resend failed (${res.status}): ${text.slice(0, 200)}`)
   }
 }
 
 export async function sendDownloadEmail(opts: {
+  creatorId: string
   to: string
   gateTitle: string
   artist: string
@@ -43,7 +46,7 @@ export async function sendDownloadEmail(opts: {
 }): Promise<void> {
   const base = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"
   const url = `${base}/download/${opts.downloadToken}`
-  await sendEmail({
+  await sendAsCreator(opts.creatorId, {
     to: opts.to,
     subject: `Your download is ready — ${opts.gateTitle}`,
     html: `
@@ -56,13 +59,14 @@ export async function sendDownloadEmail(opts: {
 }
 
 export async function sendRejectionEmail(opts: {
+  creatorId: string
   to: string
   gateTitle: string
   artist: string
   reason: string | null
   gateUrl: string
 }): Promise<void> {
-  await sendEmail({
+  await sendAsCreator(opts.creatorId, {
     to: opts.to,
     subject: `Action needed — your download of ${opts.gateTitle}`,
     html: `

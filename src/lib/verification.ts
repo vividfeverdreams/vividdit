@@ -364,6 +364,7 @@ export async function runVerification(submissionId: string): Promise<void> {
     try {
       const token = await mintDownloadToken(submissionId)
       await sendDownloadEmail({
+        creatorId: gate.creator_id,
         to: submission.email,
         gateTitle: gate.title,
         artist: gate.artist,

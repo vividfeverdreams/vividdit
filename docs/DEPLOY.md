@@ -18,11 +18,18 @@ Stack: hosted Supabase (Auth/Postgres/Storage) + Vercel (Next.js) + Resend (fan 
 5. **SMTP (required for real signups):** Supabase's built-in sender is heavily rate-limited. Dashboard → Authentication → Emails → SMTP settings → use Resend's SMTP (host `smtp.resend.com`, user `resend`, password = your Resend API key) or any provider.
 6. Copy from **Settings → API**: project URL, publishable (anon) key, secret (service role) key.
 
-## 2. Resend
+## 2. Resend (fan email is BYOK — per creator)
 
-1. Create an account at [resend.com](https://resend.com), add and verify your sending domain (DNS records).
-2. Create an API key.
-3. Decide the from address, e.g. `Vividdit <noreply@yourdomain.com>` — set as `EMAIL_FROM`.
+Fan-facing email (download links, review updates) is sent on **each creator's
+own Resend key**, configured in their dashboard Settings → Email (Resend). The
+platform is never billed for an artist's fans, and creators with no key still
+deliver downloads via the fan's status page.
+
+- There is **no platform-wide Resend env var** needed for fan email. (Creators
+  add their own key + verified sender in-app; it's encrypted at rest in
+  `creator_email_keys`, service-role only.)
+- The only place a platform Resend account helps is **Supabase Auth SMTP**
+  (creator signup-confirmation emails, step 1.5 below) — separate from fan mail.
 
 ## 3. Vercel project
 
@@ -36,8 +43,8 @@ Stack: hosted Supabase (Auth/Postgres/Storage) + Vercel (Next.js) + Resend (fan 
    | `SUPABASE_SERVICE_ROLE_KEY` | secret key — server-only, never exposed |
    | `NEXT_PUBLIC_SITE_URL` | `https://<your-domain>` |
    | `API_KEY_ENCRYPTION_SECRET` | fresh `openssl rand -base64 32` — **not** the dev one. Losing/rotating it invalidates all stored creator OpenAI keys (they re-enter them; nothing else breaks). |
-   | `RESEND_API_KEY` | from step 2 |
-   | `EMAIL_FROM` | `Vividdit <noreply@yourdomain.com>` |
+   | ~~`RESEND_API_KEY`~~ | Not used for fan email (BYOK per creator). Leave unset. |
+   | ~~`EMAIL_FROM`~~ | Not used for fan email (creators set their own sender). Leave unset. |
    | `CRON_SECRET` | fresh `openssl rand -hex 24` — Vercel Cron sends it automatically |
 
 3. Deploy. [vercel.json](../vercel.json) registers the daily cleanup cron (`/api/cron/cleanup`, 04:30 UTC) — confirm it appears under Project → Settings → Cron Jobs.

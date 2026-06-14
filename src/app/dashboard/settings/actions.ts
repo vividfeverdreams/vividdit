@@ -11,6 +11,11 @@ import {
   VERIFICATION_MODELS,
   type VerificationModel,
 } from "@/lib/ai-keys"
+import {
+  removeResendKey,
+  saveResendKey,
+  testResendKey,
+} from "@/lib/email-keys"
 import { createClient } from "@/lib/supabase/server"
 
 export type SettingsFormState = {
@@ -99,6 +104,74 @@ export async function setModelAction(
     error: null,
     success: `Verification model set to ${model}. Re-test your key to confirm access.`,
   }
+}
+
+const resendKeySchema = z.object({
+  resendKey: z
+    .string()
+    .trim()
+    .min(10, "That doesn't look like a Resend API key")
+    .max(200, "That doesn't look like a Resend API key")
+    .startsWith("re_", "Resend API keys start with re_"),
+  fromEmail: z
+    .string()
+    .trim()
+    .min(3, "Enter a sender address")
+    .max(200)
+    .refine((v) => /<[^@\s]+@[^@\s]+>$|^[^@\s]+@[^@\s]+$/.test(v), {
+      message: "Use name@domain.com or Name <name@domain.com>",
+    }),
+})
+
+export async function saveResendKeyAction(
+  _prev: SettingsFormState,
+  formData: FormData
+): Promise<SettingsFormState> {
+  const user = await requireUser()
+  if (!user) return { error: "Not signed in.", success: null }
+
+  const parsed = resendKeySchema.safeParse({
+    resendKey: formData.get("resendKey"),
+    fromEmail: formData.get("fromEmail"),
+  })
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0].message, success: null }
+  }
+
+  await saveResendKey(user.id, parsed.data.resendKey, parsed.data.fromEmail)
+  revalidatePath("/dashboard/settings")
+  return { error: null, success: "Resend key saved. Run a test to validate it." }
+}
+
+export async function testResendKeyAction(
+  _prev: SettingsFormState,
+  _formData: FormData
+): Promise<SettingsFormState> {
+  const user = await requireUser()
+  if (!user) return { error: "Not signed in.", success: null }
+
+  const info = await testResendKey(user.id)
+  revalidatePath("/dashboard/settings")
+  if (!info) return { error: "No Resend key saved yet.", success: null }
+  if (info.keyStatus === "valid") {
+    return {
+      error: null,
+      success: info.lastError ?? "Resend key is valid — fans will get emailed.",
+    }
+  }
+  return { error: info.lastError ?? "Resend key test failed.", success: null }
+}
+
+export async function removeResendKeyAction(
+  _prev: SettingsFormState,
+  _formData: FormData
+): Promise<SettingsFormState> {
+  const user = await requireUser()
+  if (!user) return { error: "Not signed in.", success: null }
+
+  await removeResendKey(user.id)
+  revalidatePath("/dashboard/settings")
+  return { error: null, success: "Resend key removed." }
 }
 
 const profileSchema = z.object({
