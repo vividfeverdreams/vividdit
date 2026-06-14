@@ -59,6 +59,10 @@ const createGateSchema = z.object({
   requireRepost: z.boolean(),
   requireFollow: z.boolean(),
   requireProofCode: z.boolean().default(true),
+  instagramEnabled: z.boolean().default(false),
+  instagramUrl: z.string().nullable().default(null),
+  spotifyEnabled: z.boolean().default(false),
+  spotifyUrl: z.string().nullable().default(null),
   asset: z
     .object({
       storagePath: z.string().min(1),
@@ -90,7 +94,9 @@ export async function createGateAction(
   }
   const d = parsed.data
 
-  if (!d.emailEnabled && !d.soundcloudEnabled) {
+  const aiGate = d.soundcloudEnabled || d.instagramEnabled || d.spotifyEnabled
+
+  if (!d.emailEnabled && !aiGate) {
     return { ok: false, error: "Enable at least one unlock requirement." }
   }
   if (
@@ -104,16 +110,31 @@ export async function createGateAction(
       error: "Pick at least one SoundCloud action (like, repost, or follow).",
     }
   }
+  const isUrl = (v: string | null) => {
+    if (!v) return false
+    try {
+      new URL(v)
+      return true
+    } catch {
+      return false
+    }
+  }
+  if (d.instagramEnabled && !isUrl(d.instagramUrl)) {
+    return { ok: false, error: "Add the Instagram profile URL to follow." }
+  }
+  if (d.spotifyEnabled && !isUrl(d.spotifyUrl)) {
+    return { ok: false, error: "Add the Spotify profile URL to follow." }
+  }
 
   if (d.publish) {
     if (!d.asset) {
       return { ok: false, error: "Upload the HQ file before publishing." }
     }
-    if (d.soundcloudEnabled && !(await hasValidOpenAiKey(user.id))) {
+    if (aiGate && !(await hasValidOpenAiKey(user.id))) {
       return {
         ok: false,
         error:
-          "SoundCloud gates need a valid OpenAI key for proof verification. Add one in Settings, or switch to an email-only gate.",
+          "Follow/social gates need a valid OpenAI key for proof verification. Add one in Settings, or switch to an email-only gate.",
       }
     }
   }
@@ -125,6 +146,8 @@ export async function createGateAction(
       title: d.title,
       artist: d.artist,
       soundcloud_url: d.soundcloudUrl,
+      instagram_url: d.instagramEnabled ? d.instagramUrl : null,
+      spotify_url: d.spotifyEnabled ? d.spotifyUrl : null,
       slug: d.slug,
       status: d.publish ? "published" : "draft",
       cover_path: d.coverPath,
@@ -148,6 +171,8 @@ export async function createGateAction(
     require_repost: d.soundcloudEnabled && d.requireRepost,
     require_follow: d.soundcloudEnabled && d.requireFollow,
     require_proof_code: d.soundcloudEnabled && d.requireProofCode,
+    instagram_enabled: d.instagramEnabled,
+    spotify_enabled: d.spotifyEnabled,
   })
 
   if (reqError) {

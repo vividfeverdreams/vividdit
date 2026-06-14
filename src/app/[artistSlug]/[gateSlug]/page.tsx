@@ -22,7 +22,9 @@ async function loadGate(params: Params) {
 
   const { data: gate } = await supabase
     .from("gates")
-    .select("id, title, artist, soundcloud_url, slug, status, theme, cover_path")
+    .select(
+      "id, title, artist, soundcloud_url, instagram_url, spotify_url, slug, status, theme, cover_path"
+    )
     .eq("creator_id", profile.id)
     .eq("slug", params.gateSlug)
     .eq("status", "published")
@@ -32,7 +34,7 @@ async function loadGate(params: Params) {
   const { data: requirements } = await supabase
     .from("gate_requirements")
     .select(
-      "email_enabled, soundcloud_enabled, require_like, require_repost, require_follow, require_proof_code"
+      "email_enabled, soundcloud_enabled, require_like, require_repost, require_follow, require_proof_code, instagram_enabled, spotify_enabled"
     )
     .eq("gate_id", gate.id)
     .maybeSingle()
@@ -147,6 +149,10 @@ export default async function GatePage({
           requireRepost: requirements.require_repost,
           requireFollow: requirements.require_follow,
           requireProofCode: requirements.require_proof_code,
+          instagramEnabled: requirements.instagram_enabled,
+          instagramUrl: gate.instagram_url,
+          spotifyEnabled: requirements.spotify_enabled,
+          spotifyUrl: gate.spotify_url,
         }}
         track={{
           title: gate.title,

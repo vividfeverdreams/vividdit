@@ -13,6 +13,8 @@ function outcome(overrides: Partial<VerificationOutcome> = {}): VerificationOutc
     like_confirmed: true,
     repost_confirmed: false,
     follow_confirmed: true,
+    instagram_follow_confirmed: false,
+    spotify_follow_confirmed: false,
     proof_code_visible: true,
     tampering_suspected: false,
     missing_requirements: [],

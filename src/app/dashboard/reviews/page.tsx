@@ -30,6 +30,8 @@ type QueueItem = {
     like: boolean
     repost: boolean
     follow: boolean
+    instagram: boolean
+    spotify: boolean
     proofCode: boolean
   }
   outcome: VerificationOutcome | null
@@ -55,7 +57,7 @@ export default async function ReviewsPage() {
   const { data: submissions } = await supabase
     .from("submissions")
     .select(
-      "id, email, proof_code, created_at, fraud_flags, gates!inner(title, creator_id, gate_requirements(require_like, require_repost, require_follow, require_proof_code))"
+      "id, email, proof_code, created_at, fraud_flags, gates!inner(title, creator_id, gate_requirements(require_like, require_repost, require_follow, require_proof_code, instagram_enabled, spotify_enabled))"
     )
     .eq("status", "needs_review")
     .eq("gates.creator_id", user.id)
@@ -71,6 +73,8 @@ export default async function ReviewsPage() {
         require_repost: boolean
         require_follow: boolean
         require_proof_code: boolean
+        instagram_enabled: boolean
+        spotify_enabled: boolean
       } | null
     }
 
@@ -108,6 +112,8 @@ export default async function ReviewsPage() {
         like: gate.gate_requirements?.require_like ?? false,
         repost: gate.gate_requirements?.require_repost ?? false,
         follow: gate.gate_requirements?.require_follow ?? false,
+        instagram: gate.gate_requirements?.instagram_enabled ?? false,
+        spotify: gate.gate_requirements?.spotify_enabled ?? false,
         proofCode: gate.gate_requirements?.require_proof_code ?? false,
       },
       outcome: (run?.result as VerificationOutcome | null) ?? null,
@@ -200,6 +206,18 @@ export default async function ReviewsPage() {
                     )}
                     {item.required.follow && (
                       <Check ok={item.outcome.follow_confirmed} label="follow" />
+                    )}
+                    {item.required.instagram && (
+                      <Check
+                        ok={item.outcome.instagram_follow_confirmed}
+                        label="instagram"
+                      />
+                    )}
+                    {item.required.spotify && (
+                      <Check
+                        ok={item.outcome.spotify_follow_confirmed}
+                        label="spotify"
+                      />
                     )}
                     {item.required.proofCode && (
                       <Check ok={item.outcome.proof_code_visible} label="code" />

@@ -17,6 +17,8 @@ export type VerificationOutcome = {
   like_confirmed: boolean
   repost_confirmed: boolean
   follow_confirmed: boolean
+  instagram_follow_confirmed: boolean
+  spotify_follow_confirmed: boolean
   proof_code_visible: boolean
   tampering_suspected: boolean
   missing_requirements: string[]
@@ -36,7 +38,12 @@ const OUTCOME_SCHEMA = {
     artist_match: { type: "boolean" },
     like_confirmed: { type: "boolean" },
     repost_confirmed: { type: "boolean" },
-    follow_confirmed: { type: "boolean" },
+    follow_confirmed: {
+      type: "boolean",
+      description: "SoundCloud follow confirmed",
+    },
+    instagram_follow_confirmed: { type: "boolean" },
+    spotify_follow_confirmed: { type: "boolean" },
     proof_code_visible: { type: "boolean" },
     tampering_suspected: { type: "boolean" },
     missing_requirements: { type: "array", items: { type: "string" } },
@@ -54,6 +61,8 @@ const OUTCOME_SCHEMA = {
     "like_confirmed",
     "repost_confirmed",
     "follow_confirmed",
+    "instagram_follow_confirmed",
+    "spotify_follow_confirmed",
     "proof_code_visible",
     "tampering_suspected",
     "missing_requirements",
@@ -61,7 +70,7 @@ const OUTCOME_SCHEMA = {
   ],
 } as const
 
-function buildPrompt(ctx: {
+type VerificationCriteria = {
   title: string
   artist: string
   trackUrl: string
@@ -69,50 +78,67 @@ function buildPrompt(ctx: {
   requireLike: boolean
   requireRepost: boolean
   requireFollow: boolean
+  requireInstagram: boolean
+  instagramUrl: string | null
+  requireSpotify: boolean
+  spotifyUrl: string | null
   proofCode: string | null
-}): string {
+}
+
+function buildPrompt(ctx: VerificationCriteria, imageLabels: string[]): string {
   const required = [
-    ctx.requireLike && "LIKE the track (red/active heart on the track page)",
-    ctx.requireRepost && "REPOST the track (active repost icon on the track page)",
+    ctx.requireLike && "LIKE the track on SoundCloud (red/active heart on the track page)",
+    ctx.requireRepost && "REPOST the track on SoundCloud (active repost icon)",
     ctx.requireFollow &&
-      "FOLLOW the artist (button shows “Following” on the artist card or profile)",
+      `FOLLOW ${ctx.artist} on SoundCloud (button shows “Following” on the artist card or profile)`,
+    ctx.requireInstagram &&
+      `FOLLOW the artist on Instagram at ${ctx.instagramUrl ?? "their profile"} (profile shows “Following”)`,
+    ctx.requireSpotify &&
+      `FOLLOW the artist on Spotify at ${ctx.spotifyUrl ?? "their profile"} (artist page shows “Following”)`,
   ]
     .filter(Boolean)
     .map((s, i) => `${i + 1}. ${s}`)
     .join("\n")
 
-  return `You verify fan-submitted screenshots for a SoundCloud download gate.
+  return `You verify fan-submitted screenshots for a music download gate.
 
 Target track: "${ctx.title}" by ${ctx.artist}
-Track URL: ${ctx.trackUrl}
-Artist profile: ${ctx.artistProfileUrl ?? "unknown"}
+SoundCloud track URL: ${ctx.trackUrl}
+SoundCloud artist profile: ${ctx.artistProfileUrl ?? "unknown"}
+Instagram profile: ${ctx.instagramUrl ?? "n/a"}
+Spotify profile: ${ctx.spotifyUrl ?? "n/a"}
 
-The fan must prove they did ALL of these on SoundCloud:
+The fan must prove they did ALL of these:
 ${required}
+
+The uploaded screenshots, in order:
+${imageLabels.map((l, i) => `- Image ${i + 1}: ${l} proof`).join("\n")}
 
 ${
   ctx.proofCode
-    ? `Expected proof code: ${ctx.proofCode}
-Fans were asked to type this code into the track's comment box before
-screenshotting. A visible matching code is strong evidence the screenshot is
-fresh and theirs. A missing code lowers confidence but is NOT a failure on
-its own.`
-    : `No proof code was requested for this gate — set proof_code_visible to
-false and do not penalize its absence.`
+    ? `Expected proof code (SoundCloud only): ${ctx.proofCode}
+Fans were asked to type this code into the SoundCloud track's comment box
+before screenshotting. A visible matching code is strong evidence the
+SoundCloud screenshot is fresh and theirs. A missing code lowers confidence
+but is NOT a failure on its own.`
+    : `No proof code was requested — set proof_code_visible to false and do not
+penalize its absence.`
 }
 
-Evaluate the screenshot(s):
-- Are they really SoundCloud (web or app)? Wrong platform → reject.
-- Is it the right track/artist? Wrong track or artist → reject.
-- Is each required action visibly in its done state (filled/active heart,
-  active repost, “Following”)? An action not visible or in the un-done state
-  goes in missing_requirements.
+Evaluate each screenshot against ITS platform:
+- Is it really that platform (SoundCloud / Instagram / Spotify, web or app)?
+  Wrong platform → that action is not confirmed.
+- Right track/artist/profile? Wrong target → not confirmed.
+- Is each required action visibly in its done state (filled heart, active
+  repost, “Following”)? Anything not clearly shown goes in missing_requirements.
+- Set the matching *_confirmed boolean true ONLY when clearly shown. Set
+  confirmed booleans for actions that are not required to false.
 - tampering_suspected: edited pixels, inconsistent fonts/UI, stitched images,
   AI-generated content, or a screenshot of a screenshot.
 
 Decide:
-- "approve" only when every required action is clearly confirmed.
-- "reject" only for obvious failures: not SoundCloud, wrong track/artist, or
+- "approve" only when every REQUIRED action is clearly confirmed.
+- "reject" only for obvious failures: wrong platforms, wrong artist/track, or
   none of the required proof present.
 - "review" for everything in between (partial proof, blur, ambiguity).
 
@@ -133,7 +159,13 @@ type RunResult = {
  */
 export function decideFinalStatus(
   outcome: VerificationOutcome | null,
-  required: { like: boolean; repost: boolean; follow: boolean },
+  required: {
+    like: boolean
+    repost: boolean
+    follow: boolean
+    instagram?: boolean
+    spotify?: boolean
+  },
   fraudFlags: string[]
 ): "approved" | "rejected" | "needs_review" {
   let finalStatus: "approved" | "rejected" | "needs_review" = "needs_review"
@@ -142,7 +174,9 @@ export function decideFinalStatus(
     const allConfirmed =
       (!required.like || outcome.like_confirmed) &&
       (!required.repost || outcome.repost_confirmed) &&
-      (!required.follow || outcome.follow_confirmed)
+      (!required.follow || outcome.follow_confirmed) &&
+      (!required.instagram || outcome.instagram_follow_confirmed) &&
+      (!required.spotify || outcome.spotify_follow_confirmed)
 
     if (
       outcome.decision === "approve" &&
@@ -170,7 +204,7 @@ export async function runVerification(submissionId: string): Promise<void> {
   const { data: submission } = await admin
     .from("submissions")
     .select(
-      "id, gate_id, status, proof_code, email, fraud_flags, gates(creator_id, title, artist, soundcloud_url)"
+      "id, gate_id, status, proof_code, email, fraud_flags, gates(creator_id, title, artist, soundcloud_url, instagram_url, spotify_url)"
     )
     .eq("id", submissionId)
     .maybeSingle()
@@ -181,6 +215,8 @@ export async function runVerification(submissionId: string): Promise<void> {
     title: string
     artist: string
     soundcloud_url: string
+    instagram_url: string | null
+    spotify_url: string | null
   }
 
   const [{ data: req }, { data: profile }, { data: proofs }] =
@@ -188,7 +224,7 @@ export async function runVerification(submissionId: string): Promise<void> {
       admin
         .from("gate_requirements")
         .select(
-          "require_like, require_repost, require_follow, require_proof_code, soundcloud_enabled"
+          "require_like, require_repost, require_follow, require_proof_code, soundcloud_enabled, instagram_enabled, spotify_enabled"
         )
         .eq("gate_id", submission.gate_id)
         .single(),
@@ -199,19 +235,22 @@ export async function runVerification(submissionId: string): Promise<void> {
         .single(),
       admin
         .from("proof_images")
-        .select("storage_path")
+        .select("storage_path, platform")
         .eq("submission_id", submissionId)
         .order("created_at", { ascending: true }),
     ])
 
-  if (!req?.soundcloud_enabled || !proofs?.length) return
+  const socialEnabled =
+    !!req &&
+    (req.soundcloud_enabled || req.instagram_enabled || req.spotify_enabled)
+  if (!socialEnabled || !proofs?.length) return
 
   await admin
     .from("submissions")
     .update({ status: "verifying" })
     .eq("id", submissionId)
 
-  const criteria = {
+  const criteria: VerificationCriteria = {
     title: gate.title,
     artist: gate.artist,
     trackUrl: gate.soundcloud_url,
@@ -219,6 +258,10 @@ export async function runVerification(submissionId: string): Promise<void> {
     requireLike: req.require_like,
     requireRepost: req.require_repost,
     requireFollow: req.require_follow,
+    requireInstagram: req.instagram_enabled,
+    instagramUrl: gate.instagram_url,
+    requireSpotify: req.spotify_enabled,
+    spotifyUrl: gate.spotify_url,
     proofCode: req.require_proof_code ? submission.proof_code : null,
   }
 
@@ -238,6 +281,7 @@ export async function runVerification(submissionId: string): Promise<void> {
   } else {
     try {
       const images: string[] = []
+      const labels: string[] = []
       for (const p of proofs) {
         const { data: blob, error } = await admin.storage
           .from("proofs")
@@ -249,6 +293,7 @@ export async function runVerification(submissionId: string): Promise<void> {
         images.push(
           `data:${mime};base64,${Buffer.from(await blob.arrayBuffer()).toString("base64")}`
         )
+        labels.push(p.platform ?? "SoundCloud")
       }
 
       const response = await fetch("https://api.openai.com/v1/responses", {
@@ -263,7 +308,7 @@ export async function runVerification(submissionId: string): Promise<void> {
             {
               role: "user",
               content: [
-                { type: "input_text", text: buildPrompt(criteria) },
+                { type: "input_text", text: buildPrompt(criteria, labels) },
                 ...images.map((url) => ({
                   type: "input_image",
                   image_url: url,
@@ -320,6 +365,8 @@ export async function runVerification(submissionId: string): Promise<void> {
       like: criteria.requireLike,
       repost: criteria.requireRepost,
       follow: criteria.requireFollow,
+      instagram: criteria.requireInstagram,
+      spotify: criteria.requireSpotify,
     },
     (submission.fraud_flags as string[]) ?? []
   )

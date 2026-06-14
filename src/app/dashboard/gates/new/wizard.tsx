@@ -70,6 +70,10 @@ export function GateWizard({
   const [requireRepost, setRequireRepost] = useState(false)
   const [requireFollow, setRequireFollow] = useState(false)
   const [requireProofCode, setRequireProofCode] = useState(true)
+  const [igEnabled, setIgEnabled] = useState(false)
+  const [igUrl, setIgUrl] = useState("")
+  const [spotifyEnabled, setSpotifyEnabled] = useState(false)
+  const [spotifyUrl, setSpotifyUrl] = useState("")
 
   // Step 5 — slug + publish
   const [slug, setSlug] = useState("")
@@ -158,6 +162,10 @@ export function GateWizard({
         requireRepost,
         requireFollow,
         requireProofCode,
+        instagramEnabled: igEnabled,
+        instagramUrl: igUrl.trim() || null,
+        spotifyEnabled: spotifyEnabled,
+        spotifyUrl: spotifyUrl.trim() || null,
         asset,
         publish,
       })
@@ -175,10 +183,14 @@ export function GateWizard({
     if (s === 0 && !track) return "Fetch your track first."
     if (s === 0 && track && (!track.title || !track.artist))
       return "Fill in the track title and artist."
-    if (s === 3 && !emailEnabled && !scEnabled)
+    if (s === 3 && !emailEnabled && !scEnabled && !igEnabled && !spotifyEnabled)
       return "Enable at least one unlock requirement."
     if (s === 3 && scEnabled && !requireLike && !requireRepost && !requireFollow)
       return "Pick at least one SoundCloud action."
+    if (s === 3 && igEnabled && !igUrl.trim())
+      return "Add the Instagram profile URL."
+    if (s === 3 && spotifyEnabled && !spotifyUrl.trim())
+      return "Add the Spotify profile URL."
     return null
   }
 
@@ -407,6 +419,76 @@ export function GateWizard({
                   </div>
                 </div>
               )}
+
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label htmlFor="igGate">Instagram follow gate</Label>
+                  <p className="text-sm text-muted-foreground">
+                    Fans prove they follow you on Instagram, verified by AI.
+                  </p>
+                </div>
+                <Switch
+                  id="igGate"
+                  checked={igEnabled}
+                  onCheckedChange={setIgEnabled}
+                />
+              </div>
+              {igEnabled && (
+                <div className="space-y-2 rounded-lg border p-4">
+                  {!hasValidKey && (
+                    <Alert variant="destructive">
+                      <AlertDescription>
+                        You need a valid OpenAI key to publish a follow gate.{" "}
+                        <Link href="/dashboard/settings" className="underline">
+                          Add one in Settings.
+                        </Link>
+                      </AlertDescription>
+                    </Alert>
+                  )}
+                  <Label htmlFor="igUrl">Instagram profile URL</Label>
+                  <Input
+                    id="igUrl"
+                    value={igUrl}
+                    onChange={(e) => setIgUrl(e.target.value)}
+                    placeholder="https://instagram.com/yourhandle"
+                  />
+                </div>
+              )}
+
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label htmlFor="spGate">Spotify follow gate</Label>
+                  <p className="text-sm text-muted-foreground">
+                    Fans prove they follow you on Spotify, verified by AI.
+                  </p>
+                </div>
+                <Switch
+                  id="spGate"
+                  checked={spotifyEnabled}
+                  onCheckedChange={setSpotifyEnabled}
+                />
+              </div>
+              {spotifyEnabled && (
+                <div className="space-y-2 rounded-lg border p-4">
+                  {!hasValidKey && (
+                    <Alert variant="destructive">
+                      <AlertDescription>
+                        You need a valid OpenAI key to publish a follow gate.{" "}
+                        <Link href="/dashboard/settings" className="underline">
+                          Add one in Settings.
+                        </Link>
+                      </AlertDescription>
+                    </Alert>
+                  )}
+                  <Label htmlFor="spUrl">Spotify artist/profile URL</Label>
+                  <Input
+                    id="spUrl"
+                    value={spotifyUrl}
+                    onChange={(e) => setSpotifyUrl(e.target.value)}
+                    placeholder="https://open.spotify.com/artist/…"
+                  />
+                </div>
+              )}
             </div>
           )}
 
@@ -460,6 +542,8 @@ export function GateWizard({
                       ]
                         .filter(Boolean)
                         .join(", ")})`,
+                    igEnabled && "Instagram follow",
+                    spotifyEnabled && "Spotify follow",
                   ]
                     .filter(Boolean)
                     .join(" + ")}

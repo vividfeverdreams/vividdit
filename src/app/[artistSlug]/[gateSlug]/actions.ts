@@ -1,10 +1,12 @@
 "use server"
 
 import { createHash, randomInt } from "node:crypto"
+import { after } from "next/server"
 import { headers } from "next/headers"
 import { z } from "zod"
 
 import { createAdminClient } from "@/lib/supabase/admin"
+import { runVerification } from "@/lib/verification"
 
 export type StartSubmissionResult =
   | {
@@ -59,7 +61,7 @@ export async function startSubmissionAction(input: {
 
   const { data: req } = await admin
     .from("gate_requirements")
-    .select("email_enabled, soundcloud_enabled")
+    .select("email_enabled, soundcloud_enabled, instagram_enabled, spotify_enabled")
     .eq("gate_id", d.gateId)
     .single()
   if (!req) {
@@ -74,7 +76,9 @@ export async function startSubmissionAction(input: {
   }
 
   // Email-only gates unlock instantly — no proof or AI involved.
-  const approved = !req.soundcloud_enabled
+  const socialEnabled =
+    req.soundcloud_enabled || req.instagram_enabled || req.spotify_enabled
+  const approved = !socialEnabled
 
   const { ipHash, userAgent } = await hashIp()
   const proofCode = `GATE-${randomInt(1000, 10_000)}`
@@ -155,4 +159,46 @@ export async function startSubmissionAction(input: {
     proofCode,
     approved,
   }
+}
+
+/** Triggers AI verification once all stepped proofs are uploaded. */
+export async function finalizeSubmissionAction(
+  statusToken: string
+): Promise<{ ok: boolean }> {
+  if (!/^[0-9a-f-]{36}$/i.test(statusToken)) return { ok: false }
+  const admin = createAdminClient()
+  const { data: submission } = await admin
+    .from("submissions")
+    .select("id, gate_id, status")
+    .eq("status_token", statusToken)
+    .maybeSingle()
+  if (!submission || !["pending", "rejected"].includes(submission.status)) {
+    return { ok: false }
+  }
+
+  await admin
+    .from("submissions")
+    .update({ status: "pending" })
+    .eq("id", submission.id)
+  await admin.from("events").insert({
+    gate_id: submission.gate_id,
+    submission_id: submission.id,
+    event_type: "submit",
+  })
+  after(() => runVerification(submission.id))
+  return { ok: true }
+}
+
+/** Lightweight poll for the stepped flow's "verifying → download" transition. */
+export async function getSubmissionStatusAction(
+  statusToken: string
+): Promise<{ status: string | null }> {
+  if (!/^[0-9a-f-]{36}$/i.test(statusToken)) return { status: null }
+  const admin = createAdminClient()
+  const { data } = await admin
+    .from("submissions")
+    .select("status")
+    .eq("status_token", statusToken)
+    .maybeSingle()
+  return { status: data?.status ?? null }
 }

@@ -30,6 +30,15 @@ export async function POST(
 
   const statusToken = form.get("statusToken")
   const files = form.getAll("proofs").filter((f): f is File => f instanceof File)
+  const platformRaw = form.get("platform")
+  const platform =
+    typeof platformRaw === "string" &&
+    ["soundcloud", "instagram", "spotify"].includes(platformRaw)
+      ? platformRaw
+      : "soundcloud"
+  // Stepped flow uploads one platform at a time and finalizes after the last
+  // step; legacy/resubmit callers omit the flag and verify immediately.
+  const finalize = form.get("finalize") !== "false"
 
   if (typeof statusToken !== "string" || !statusToken) {
     return NextResponse.json({ error: "Missing token." }, { status: 401 })
@@ -191,7 +200,7 @@ export async function POST(
   }
 
   const { error: rowError } = await admin.from("proof_images").insert(
-    stored.map((s) => ({ submission_id: submission.id, ...s }))
+    stored.map((s) => ({ submission_id: submission.id, platform, ...s }))
   )
   if (rowError) {
     return NextResponse.json(
@@ -205,15 +214,16 @@ export async function POST(
     .update({ status: "pending" })
     .eq("id", submission.id)
 
-  await admin.from("events").insert({
-    gate_id: submission.gate_id,
-    submission_id: submission.id,
-    event_type: "submit",
-  })
-
-  // Verify after the response is sent — the fan sees "verifying" on the
-  // status page and the result lands seconds later.
-  after(() => runVerification(submission.id))
+  if (finalize) {
+    await admin.from("events").insert({
+      gate_id: submission.gate_id,
+      submission_id: submission.id,
+      event_type: "submit",
+    })
+    // Verify after the response is sent — the fan sees "verifying" and the
+    // result lands seconds later.
+    after(() => runVerification(submission.id))
+  }
 
   return NextResponse.json({ ok: true, count: stored.length })
 }

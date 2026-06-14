@@ -47,12 +47,14 @@ export async function publishGate(formData: FormData) {
       .maybeSingle(),
     supabase
       .from("gate_requirements")
-      .select("soundcloud_enabled")
+      .select("soundcloud_enabled, instagram_enabled, spotify_enabled")
       .eq("gate_id", gateId)
       .maybeSingle(),
   ])
   if (!asset) return
-  if (req?.soundcloud_enabled && !(await hasValidOpenAiKey(user.id))) return
+  const aiGate =
+    req?.soundcloud_enabled || req?.instagram_enabled || req?.spotify_enabled
+  if (aiGate && !(await hasValidOpenAiKey(user.id))) return
 
   await supabase
     .from("gates")
