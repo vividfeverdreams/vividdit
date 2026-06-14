@@ -21,6 +21,8 @@ export function OnboardingForm({
     artistName: string
     artistSlug: string
     soundcloudProfileUrl: string
+    instagramUrl: string
+    spotifyUrl: string
     slugLocked: boolean
   }
 }) {
@@ -90,6 +92,35 @@ export function OnboardingForm({
           required
         />
       </div>
+
+      <div className="space-y-1 border-t pt-4">
+        <p className="text-sm font-medium">Link your other profiles (optional)</p>
+        <p className="text-xs text-muted-foreground">
+          We&apos;ll save these so you can one-click add them when building gates
+          — no re-typing every time.
+        </p>
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="instagramUrl">Instagram profile URL</Label>
+        <Input
+          id="instagramUrl"
+          name="instagramUrl"
+          type="url"
+          defaultValue={defaults.instagramUrl}
+          placeholder="https://instagram.com/your-handle"
+        />
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="spotifyUrl">Spotify artist URL</Label>
+        <Input
+          id="spotifyUrl"
+          name="spotifyUrl"
+          type="url"
+          defaultValue={defaults.spotifyUrl}
+          placeholder="https://open.spotify.com/artist/…"
+        />
+      </div>
+
       <Button type="submit" className="w-full" disabled={pending}>
         {pending ? "Saving…" : "Save and continue"}
       </Button>

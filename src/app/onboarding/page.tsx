@@ -17,7 +17,9 @@ export default async function OnboardingPage() {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("artist_name, artist_slug, soundcloud_profile_url, access_unlocked_at")
+    .select(
+      "artist_name, artist_slug, soundcloud_profile_url, instagram_url, spotify_url, access_unlocked_at"
+    )
     .eq("id", user.id)
     .single()
 
@@ -43,6 +45,8 @@ export default async function OnboardingPage() {
           artistName: profile?.artist_name ?? "",
           artistSlug: profile?.artist_slug ?? "",
           soundcloudProfileUrl: profile?.soundcloud_profile_url ?? "",
+          instagramUrl: profile?.instagram_url ?? "",
+          spotifyUrl: profile?.spotify_url ?? "",
           slugLocked: !!profile?.artist_slug,
         }}
       />

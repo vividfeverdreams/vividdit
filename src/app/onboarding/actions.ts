@@ -17,6 +17,8 @@ export async function completeOnboarding(
     artistName: formData.get("artistName"),
     artistSlug: formData.get("artistSlug"),
     soundcloudProfileUrl: formData.get("soundcloudProfileUrl"),
+    instagramUrl: formData.get("instagramUrl") || undefined,
+    spotifyUrl: formData.get("spotifyUrl") || undefined,
   })
   if (!parsed.success) {
     return { error: parsed.error.issues[0].message }
@@ -37,9 +39,11 @@ export async function completeOnboarding(
     .single()
 
   // artist_slug is immutable (DB trigger). Only send it when unset.
-  const update: Record<string, string> = {
+  const update: Record<string, string | null> = {
     artist_name: parsed.data.artistName,
     soundcloud_profile_url: parsed.data.soundcloudProfileUrl,
+    instagram_url: parsed.data.instagramUrl,
+    spotify_url: parsed.data.spotifyUrl,
   }
   if (!profile?.artist_slug) {
     update.artist_slug = parsed.data.artistSlug
@@ -59,5 +63,6 @@ export async function completeOnboarding(
     return { error: "Couldn't save your profile. Please try again." }
   }
 
-  redirect("/dashboard")
+  // Route through the (skippable) API-keys prompt before the dashboard.
+  redirect("/onboarding/keys")
 }

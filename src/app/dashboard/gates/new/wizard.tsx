@@ -44,10 +44,16 @@ export function GateWizard({
   artistSlug,
   defaultArtist,
   hasValidKey,
+  ownProfiles,
 }: {
   artistSlug: string
   defaultArtist: string
   hasValidKey: boolean
+  ownProfiles: {
+    soundcloud: string | null
+    instagram: string | null
+    spotify: string | null
+  }
 }) {
   const router = useRouter()
   const [step, setStep] = useState(0)
@@ -510,18 +516,21 @@ export function GateWizard({
                   urls={scFollows}
                   onChange={setScFollows}
                   placeholder="https://soundcloud.com/artist"
+                  own={ownProfiles.soundcloud}
                 />
                 <FollowList
                   label="Instagram profiles to follow"
                   urls={igFollows}
                   onChange={setIgFollows}
                   placeholder="https://instagram.com/handle"
+                  own={ownProfiles.instagram}
                 />
                 <FollowList
                   label="Spotify profiles to follow"
                   urls={spFollows}
                   onChange={setSpFollows}
                   placeholder="https://open.spotify.com/artist/…"
+                  own={ownProfiles.spotify}
                 />
               </div>
             </div>
@@ -620,15 +629,28 @@ function FollowList({
   urls,
   onChange,
   placeholder,
+  own,
 }: {
   label: string
   urls: string[]
   onChange: (urls: string[]) => void
   placeholder: string
+  own?: string | null
 }) {
+  const canAddOwn = !!own && !urls.includes(own)
   return (
     <div className="space-y-2">
       <Label>{label}</Label>
+      {canAddOwn && (
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          onClick={() => onChange([...urls.filter((u) => u.trim()), own!])}
+        >
+          + Add my profile
+        </Button>
+      )}
       {urls.map((u, i) => (
         <div key={i} className="flex gap-2">
           <Input

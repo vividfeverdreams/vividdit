@@ -41,6 +41,21 @@ export const onboardingSchema = z.object({
       },
       { message: "Must be a soundcloud.com profile URL" }
     ),
+  // Optional linked accounts — saved for one-click add when building gates.
+  instagramUrl: z
+    .string()
+    .trim()
+    .max(300)
+    .optional()
+    .transform((v) => v || null)
+    .refine((v) => !v || /^https?:\/\//.test(v), "Enter a valid URL"),
+  spotifyUrl: z
+    .string()
+    .trim()
+    .max(300)
+    .optional()
+    .transform((v) => v || null)
+    .refine((v) => !v || /^https?:\/\//.test(v), "Enter a valid URL"),
 })
 
 export function slugify(input: string): string {

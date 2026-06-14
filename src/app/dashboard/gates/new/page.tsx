@@ -28,7 +28,9 @@ export default async function NewGatePage() {
   const [{ data: profile }, keyValid, byor2, { count }] = await Promise.all([
     supabase
       .from("profiles")
-      .select("artist_name, artist_slug")
+      .select(
+        "artist_name, artist_slug, soundcloud_profile_url, instagram_url, spotify_url"
+      )
       .eq("id", user.id)
       .single(),
     hasValidOpenAiKey(user.id),
@@ -65,6 +67,11 @@ export default async function NewGatePage() {
           artistSlug={profile?.artist_slug ?? ""}
           defaultArtist={profile?.artist_name ?? ""}
           hasValidKey={keyValid}
+          ownProfiles={{
+            soundcloud: profile?.soundcloud_profile_url ?? null,
+            instagram: profile?.instagram_url ?? null,
+            spotify: profile?.spotify_url ?? null,
+          }}
         />
       )}
     </div>
