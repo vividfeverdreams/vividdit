@@ -16,6 +16,7 @@ import {
   saveResendKey,
   testResendKey,
 } from "@/lib/email-keys"
+import { removeR2, saveR2, testR2 } from "@/lib/storage"
 import { createClient } from "@/lib/supabase/server"
 
 export type SettingsFormState = {
@@ -172,6 +173,79 @@ export async function removeResendKeyAction(
   await removeResendKey(user.id)
   revalidatePath("/dashboard/settings")
   return { error: null, success: "Resend key removed." }
+}
+
+const r2Schema = z.object({
+  accountId: z.string().trim().min(1, "Enter your Cloudflare account ID").max(100),
+  accessKeyId: z.string().trim().min(1, "Enter the R2 access key ID").max(200),
+  secret: z.string().trim().min(1, "Enter the R2 secret access key").max(400),
+  bucket: z.string().trim().min(1, "Enter the bucket name").max(100),
+  publicBaseUrl: z
+    .string()
+    .trim()
+    .max(300)
+    .optional()
+    .transform((v) => (v ? v.replace(/\/$/, "") : null)),
+})
+
+export async function saveR2Action(
+  _prev: SettingsFormState,
+  formData: FormData
+): Promise<SettingsFormState> {
+  const user = await requireUser()
+  if (!user) return { error: "Not signed in.", success: null }
+
+  const parsed = r2Schema.safeParse({
+    accountId: formData.get("accountId"),
+    accessKeyId: formData.get("accessKeyId"),
+    secret: formData.get("secret"),
+    bucket: formData.get("bucket"),
+    publicBaseUrl: formData.get("publicBaseUrl") || undefined,
+  })
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0].message, success: null }
+  }
+
+  await saveR2(user.id, {
+    accountId: parsed.data.accountId,
+    accessKeyId: parsed.data.accessKeyId,
+    secret: parsed.data.secret,
+    bucket: parsed.data.bucket,
+    publicBaseUrl: parsed.data.publicBaseUrl ?? null,
+  })
+  revalidatePath("/dashboard/settings")
+  return { error: null, success: "R2 saved. Run a test to validate it." }
+}
+
+export async function testR2Action(
+  _prev: SettingsFormState,
+  _formData: FormData
+): Promise<SettingsFormState> {
+  const user = await requireUser()
+  if (!user) return { error: "Not signed in.", success: null }
+
+  const info = await testR2(user.id)
+  revalidatePath("/dashboard/settings")
+  if (!info) return { error: "No R2 storage saved yet.", success: null }
+  if (info.status === "valid") {
+    return {
+      error: null,
+      success: "R2 is connected — you now have unlimited gates.",
+    }
+  }
+  return { error: info.lastError ?? "R2 test failed.", success: null }
+}
+
+export async function removeR2Action(
+  _prev: SettingsFormState,
+  _formData: FormData
+): Promise<SettingsFormState> {
+  const user = await requireUser()
+  if (!user) return { error: "Not signed in.", success: null }
+
+  await removeR2(user.id)
+  revalidatePath("/dashboard/settings")
+  return { error: null, success: "R2 storage removed." }
 }
 
 const profileSchema = z.object({

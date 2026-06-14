@@ -69,6 +69,28 @@ export async function uploadHqFile(
   }
 }
 
+/** Direct browser → R2 upload via a presigned PUT URL (with progress). */
+export function uploadToPresignedUrl(
+  uploadUrl: string,
+  file: File,
+  onProgress: (percent: number) => void
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open("PUT", uploadUrl)
+    xhr.setRequestHeader("content-type", file.type || "application/octet-stream")
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100))
+    }
+    xhr.onload = () =>
+      xhr.status >= 200 && xhr.status < 300
+        ? resolve()
+        : reject(new Error(`Upload failed (${xhr.status})`))
+    xhr.onerror = () => reject(new Error("Upload failed"))
+    xhr.send(file)
+  })
+}
+
 /** Standard upload for cover images (small files, public bucket). */
 export async function uploadCoverImage(file: File): Promise<string> {
   const supabase = createClient()

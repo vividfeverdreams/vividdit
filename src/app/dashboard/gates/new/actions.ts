@@ -1,11 +1,39 @@
 "use server"
 
+import { randomUUID } from "node:crypto"
 import { z } from "zod"
 
 import { hasValidOpenAiKey } from "@/lib/ai-keys"
+import { FREE_GATE_LIMIT } from "@/lib/limits"
 import { resolveSoundcloudTrack, type SoundcloudTrack } from "@/lib/soundcloud"
+import { hasValidR2, presignR2Upload } from "@/lib/storage"
 import { createClient } from "@/lib/supabase/server"
 import { slugRegex } from "@/lib/validation"
+
+export type HqUploadTarget =
+  | { provider: "r2"; uploadUrl: string; objectKey: string }
+  | { provider: "supabase" }
+
+// The wizard asks where to upload before sending the file: a creator's own R2
+// (presigned PUT, direct browser → R2) or our Supabase bucket (TUS).
+export async function getHqUploadTargetAction(
+  filename: string,
+  contentType: string
+): Promise<HqUploadTarget | { error: string }> {
+  const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) return { error: "Not signed in." }
+
+  if (await hasValidR2(user.id)) {
+    const safe = filename.replace(/[^a-zA-Z0-9._-]/g, "_")
+    const objectKey = `${user.id}/${randomUUID()}/${safe}`
+    const uploadUrl = await presignR2Upload(user.id, objectKey, contentType)
+    if (uploadUrl) return { provider: "r2", uploadUrl, objectKey }
+  }
+  return { provider: "supabase" }
+}
 
 export async function resolveTrackAction(
   url: string
@@ -69,6 +97,7 @@ const createGateSchema = z.object({
       filename: z.string().min(1),
       sizeBytes: z.number().int().positive(),
       mimeType: z.string().min(1),
+      storageProvider: z.enum(["supabase", "r2"]).default("supabase"),
     })
     .nullable(),
   publish: z.boolean(),
@@ -93,6 +122,23 @@ export async function createGateAction(
     return { ok: false, error: parsed.error.issues[0].message }
   }
   const d = parsed.data
+
+  // Free creators get FREE_GATE_LIMIT gates on our storage; connecting R2
+  // lifts the cap. Archived gates don't count toward the limit.
+  const byor2 = await hasValidR2(user.id)
+  if (!byor2) {
+    const { count } = await supabase
+      .from("gates")
+      .select("id", { count: "exact", head: true })
+      .eq("creator_id", user.id)
+      .neq("status", "archived")
+    if ((count ?? 0) >= FREE_GATE_LIMIT) {
+      return {
+        ok: false,
+        error: `Free accounts can have ${FREE_GATE_LIMIT} active gates. Connect your own Cloudflare R2 storage in Settings for unlimited gates.`,
+      }
+    }
+  }
 
   const aiGate = d.soundcloudEnabled || d.instagramEnabled || d.spotifyEnabled
 
@@ -187,6 +233,7 @@ export async function createGateAction(
       filename: d.asset.filename,
       size_bytes: d.asset.sizeBytes,
       mime_type: d.asset.mimeType,
+      storage_provider: d.asset.storageProvider,
     })
     if (assetError) {
       await supabase.from("gates").delete().eq("id", gate.id)

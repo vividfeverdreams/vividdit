@@ -7,6 +7,7 @@ import { useState, useTransition } from "react"
 import {
   checkSlugAction,
   createGateAction,
+  getHqUploadTargetAction,
   resolveTrackAction,
 } from "@/app/dashboard/gates/new/actions"
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -19,9 +20,12 @@ import { Switch } from "@/components/ui/switch"
 import {
   uploadCoverImage,
   uploadHqFile,
+  uploadToPresignedUrl,
   type HqUploadResult,
 } from "@/lib/uploads"
 import { slugify, slugRegex } from "@/lib/validation"
+
+type Asset = HqUploadResult & { storageProvider: "supabase" | "r2" }
 
 const STEPS = ["Track", "File", "Design", "Unlock", "Publish"] as const
 
@@ -55,7 +59,7 @@ export function GateWizard({
   const [resolving, startResolving] = useTransition()
 
   // Step 2 — HQ file
-  const [asset, setAsset] = useState<HqUploadResult | null>(null)
+  const [asset, setAsset] = useState<Asset | null>(null)
   const [uploadPercent, setUploadPercent] = useState<number | null>(null)
 
   // Step 3 — design
@@ -108,8 +112,24 @@ export function GateWizard({
     }
     try {
       setUploadPercent(0)
-      const result = await uploadHqFile(file, setUploadPercent)
-      setAsset(result)
+      const target = await getHqUploadTargetAction(file.name, file.type || "application/octet-stream")
+      if ("error" in target) {
+        setError(target.error)
+        return
+      }
+      if (target.provider === "r2") {
+        await uploadToPresignedUrl(target.uploadUrl, file, setUploadPercent)
+        setAsset({
+          storagePath: target.objectKey,
+          filename: file.name,
+          sizeBytes: file.size,
+          mimeType: file.type || "application/octet-stream",
+          storageProvider: "r2",
+        })
+      } else {
+        const result = await uploadHqFile(file, setUploadPercent)
+        setAsset({ ...result, storageProvider: "supabase" })
+      }
     } catch {
       setError("Upload failed. Check your connection and try again.")
     } finally {

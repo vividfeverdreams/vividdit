@@ -3,6 +3,7 @@ import "server-only"
 import { createHash, randomBytes } from "node:crypto"
 
 import { createAdminClient } from "@/lib/supabase/admin"
+import { r2DownloadUrl } from "@/lib/storage"
 
 // Download delivery. Two paths:
 //  - On-page: the fan holds their submission's status_token; a route swaps it
@@ -45,26 +46,38 @@ async function signedUrlForSubmission(
 
   const { data: submission } = await admin
     .from("submissions")
-    .select("id, gate_id, status")
+    .select("id, gate_id, status, gates(creator_id)")
     .eq("id", submissionId)
     .maybeSingle()
   if (!submission || submission.status !== "approved") {
     return { ok: false, reason: "not_found" }
   }
+  const gate = submission.gates as unknown as { creator_id: string }
 
   const { data: asset } = await admin
     .from("download_assets")
-    .select("storage_path, filename")
+    .select("storage_path, filename, storage_provider")
     .eq("gate_id", submission.gate_id)
     .maybeSingle()
   if (!asset) return { ok: false, reason: "unavailable" }
 
-  const { data: signed, error } = await admin.storage
-    .from("hq-files")
-    .createSignedUrl(asset.storage_path, SIGNED_URL_TTL_SECONDS, {
-      download: asset.filename,
-    })
-  if (error || !signed) return { ok: false, reason: "unavailable" }
+  let downloadUrl: string | null = null
+  if (asset.storage_provider === "r2") {
+    // Hosted on the creator's own R2 bucket — presign a GET there.
+    downloadUrl = await r2DownloadUrl(
+      gate.creator_id,
+      asset.storage_path,
+      asset.filename
+    )
+  } else {
+    const { data: signed } = await admin.storage
+      .from("hq-files")
+      .createSignedUrl(asset.storage_path, SIGNED_URL_TTL_SECONDS, {
+        download: asset.filename,
+      })
+    downloadUrl = signed?.signedUrl ?? null
+  }
+  if (!downloadUrl) return { ok: false, reason: "unavailable" }
 
   await admin.from("events").insert({
     gate_id: submission.gate_id,
@@ -72,7 +85,7 @@ async function signedUrlForSubmission(
     event_type: "download",
   })
 
-  return { ok: true, signedUrl: signed.signedUrl }
+  return { ok: true, signedUrl: downloadUrl }
 }
 
 /** Email-link path: validate the token row, count a use, sign. */
