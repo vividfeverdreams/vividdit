@@ -17,9 +17,13 @@ export default async function OnboardingPage() {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("artist_name, artist_slug, soundcloud_profile_url")
+    .select("artist_name, artist_slug, soundcloud_profile_url, access_unlocked_at")
     .eq("id", user.id)
     .single()
+
+  if (!profile?.access_unlocked_at) {
+    redirect("/get-access")
+  }
 
   const complete =
     !!profile?.artist_name &&

@@ -15,10 +15,15 @@ export default function Home() {
           Gate your HQ files behind likes, reposts, follows, and email signups.
           Your track stays public on SoundCloud — the WAV is the reward.
         </p>
+        <p className="text-base text-muted-foreground">
+          Built by an artist, for artists — and free to use. I made Vividdit
+          after SoundCloud broke the old download gates, and I&apos;m sharing
+          it with the community at no cost.
+        </p>
       </div>
       <div className="flex gap-3">
         <Button render={<Link href="/signup" />} nativeButton={false} size="lg">
-          Get started free
+          Get started
         </Button>
         <Button
           render={<Link href="/login" />}
