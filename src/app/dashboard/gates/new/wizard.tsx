@@ -71,6 +71,7 @@ export function GateWizard({
   // Step 3 — design
   const [accentColor, setAccentColor] = useState("#18181b")
   const [coverPath, setCoverPath] = useState<string | null>(null)
+  const [coverPreview, setCoverPreview] = useState<string | null>(null)
   const [coverUploading, setCoverUploading] = useState(false)
 
   // Step 3 — tracking pixels (optional)
@@ -163,6 +164,7 @@ export function GateWizard({
       return
     }
     try {
+      setCoverPreview(URL.createObjectURL(file))
       setCoverUploading(true)
       setCoverPath(await uploadCoverImage(file))
     } catch {
@@ -379,6 +381,16 @@ export function GateWizard({
                     ? "✓ Custom cover uploaded."
                     : "Defaults to your SoundCloud artwork."}
                 </p>
+              </div>
+
+              <div className="space-y-2 border-t pt-4">
+                <Label>Live preview</Label>
+                <GatePreview
+                  accent={accentColor}
+                  coverUrl={coverPreview ?? track?.artworkUrl ?? null}
+                  title={track?.title ?? "Your track title"}
+                  artist={track?.artist ?? "Artist"}
+                />
               </div>
 
               <div className="space-y-3 border-t pt-4">
@@ -680,6 +692,70 @@ function FollowList({
       >
         + Add profile
       </Button>
+    </div>
+  )
+}
+
+function GatePreview({
+  accent,
+  coverUrl,
+  title,
+  artist,
+}: {
+  accent: string
+  coverUrl: string | null
+  title: string
+  artist: string
+}) {
+  return (
+    <div className="mx-auto w-full max-w-xs overflow-hidden rounded-xl border bg-background shadow-sm">
+      <div className="space-y-3 p-4">
+        <div className="flex items-center gap-3">
+          {coverUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={coverUrl}
+              alt=""
+              className="size-12 rounded-md object-cover"
+            />
+          ) : (
+            <div className="size-12 rounded-md bg-muted" />
+          )}
+          <div className="min-w-0">
+            <p
+              className="text-[10px] font-medium tracking-widest uppercase"
+              style={{ color: accent }}
+            >
+              Free download
+            </p>
+            <p className="truncate text-sm font-semibold">{title}</p>
+            <p className="truncate text-xs text-muted-foreground">{artist}</p>
+          </div>
+        </div>
+
+        {/* faux SoundCloud player */}
+        <div className="flex items-center gap-2 rounded-md bg-muted px-2 py-2">
+          <div
+            className="flex size-5 items-center justify-center rounded-full text-[8px] text-white"
+            style={{ backgroundColor: accent }}
+          >
+            ▶
+          </div>
+          <div className="h-1 flex-1 rounded bg-foreground/15" />
+        </div>
+
+        {/* unlock card */}
+        <div className="space-y-2 rounded-lg border p-3">
+          <div className="h-1 w-full rounded bg-foreground/10" />
+          <p className="text-xs font-medium">Unlock the HQ download</p>
+          <div
+            className="flex h-8 items-center justify-center rounded-md text-xs font-medium text-white"
+            style={{ backgroundColor: accent }}
+          >
+            Get the download
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
