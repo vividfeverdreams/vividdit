@@ -52,18 +52,18 @@ export function StorageSection({
         <h2 className="text-lg font-medium">Storage (Cloudflare R2)</h2>
         <p className="text-sm text-muted-foreground">
           The free plan includes {freeGateLimit} gates on Vividdit&apos;s
-          storage. Connect your own{" "}
+          storage. Connect your own Cloudflare R2 bucket for{" "}
+          <strong>unlimited gates</strong> — your HQ files and fan downloads run
+          on your own bucket (R2 has no egress fees). Your secret is encrypted at
+          rest.{" "}
           <a
-            href="https://developers.cloudflare.com/r2/"
+            href="/guides/cloudflare-r2"
             target="_blank"
             rel="noreferrer"
-            className="underline"
+            className="font-medium text-foreground underline"
           >
-            Cloudflare R2
-          </a>{" "}
-          bucket for <strong>unlimited gates</strong> — your HQ files and fan
-          downloads run on your own bucket (R2 has no egress fees). Your secret
-          is encrypted at rest.
+            New to Cloudflare? Follow the step-by-step setup guide →
+          </a>
         </p>
       </div>
 
@@ -127,9 +127,15 @@ export function StorageSection({
             <Input id="publicBaseUrl" name="publicBaseUrl" placeholder="https://files.yourdomain.com" />
           </div>
           <p className="text-xs text-muted-foreground">
-            In R2, create an API token with Object Read &amp; Write for this
-            bucket. Add a CORS rule allowing <code>PUT</code> from{" "}
-            <code>https://vividdit.com</code> so uploads work.
+            Not sure where to find these?{" "}
+            <a
+              href="/guides/cloudflare-r2"
+              target="_blank"
+              rel="noreferrer"
+              className="font-medium text-foreground underline"
+            >
+              Open the step-by-step R2 setup guide →
+            </a>
           </p>
           <Button type="submit" disabled={savePending}>
             {savePending ? "Saving…" : "Save R2 storage"}

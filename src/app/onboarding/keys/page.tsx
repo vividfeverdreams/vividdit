@@ -92,7 +92,7 @@ export default async function OnboardingKeysPage() {
         <div className="space-y-3">
           <HowTo
             title="Cloudflare R2 — your own storage for HQ files"
-            steps="Get it at Cloudflare → R2 → create a bucket, then an API token with Object Read & Write."
+            steps="New to Cloudflare? Use the step-by-step setup guide linked in the section below — it walks through every value."
             caveat={`you're limited to ${FREE_GATE_LIMIT} active gates on Vividdit's storage. Connect R2 for unlimited.`}
           />
           <StorageSection info={r2Info} freeGateLimit={FREE_GATE_LIMIT} />
