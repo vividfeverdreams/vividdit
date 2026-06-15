@@ -65,7 +65,15 @@ export function OpenAiKeySection({
         <p className="text-sm text-muted-foreground">
           Used to verify fan proof screenshots with AI. Required before
           publishing a SoundCloud gate; email-only gates work without it. Your
-          key is encrypted at rest and never sent to the browser.
+          key is encrypted at rest and never sent to the browser.{" "}
+          <a
+            href="/guides/openai-api-key"
+            target="_blank"
+            rel="noreferrer"
+            className="font-medium text-foreground underline"
+          >
+            New to OpenAI? Follow the step-by-step setup guide →
+          </a>
         </p>
       </div>
 

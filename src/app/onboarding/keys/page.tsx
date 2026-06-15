@@ -70,21 +70,10 @@ export default async function OnboardingKeysPage() {
         <div className="space-y-3">
           <HowTo
             title="OpenAI key — verifies fan screenshots with AI"
-            steps="Get it at platform.openai.com → API keys → Create new secret key. Recommended model: gpt-5.4-mini (cheap)."
+            steps="New to OpenAI? Use the step-by-step setup guide linked in the section below — it walks through getting your key (about $5, lasts a long time)."
             caveat="you can't publish gates that need follow/like/repost verification. Email-only gates still work."
           />
           <OpenAiKeySection keyInfo={keyInfo} models={VERIFICATION_MODELS} />
-        </div>
-
-        <Separator />
-
-        <div className="space-y-3">
-          <HowTo
-            title="Resend key — emails fans their download links"
-            steps="Get it at resend.com → API Keys → Create. Verify your domain to email any fan (sandbox only emails your own address)."
-            caveat="fans won't get emailed their download link or review updates — they'll still download from their status page."
-          />
-          <ResendKeySection keyInfo={emailKeyInfo} />
         </div>
 
         <Separator />
@@ -96,6 +85,17 @@ export default async function OnboardingKeysPage() {
             caveat={`you're limited to ${FREE_GATE_LIMIT} active gates on Vividdit's storage. Connect R2 for unlimited.`}
           />
           <StorageSection info={r2Info} freeGateLimit={FREE_GATE_LIMIT} />
+        </div>
+
+        <Separator />
+
+        <div className="space-y-3">
+          <HowTo
+            title="Resend key — emails fans their download links"
+            steps="Get it at resend.com → API Keys → Create. Verify your domain to email any fan (sandbox only emails your own address)."
+            caveat="fans won't get emailed their download link or review updates — they'll still download from their status page."
+          />
+          <ResendKeySection keyInfo={emailKeyInfo} />
         </div>
       </div>
 

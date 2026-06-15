@@ -50,9 +50,9 @@ export default async function SettingsPage() {
       <Separator />
       <OpenAiKeySection keyInfo={keyInfo} models={VERIFICATION_MODELS} />
       <Separator />
-      <ResendKeySection keyInfo={emailKeyInfo} />
-      <Separator />
       <StorageSection info={r2Info} freeGateLimit={FREE_GATE_LIMIT} />
+      <Separator />
+      <ResendKeySection keyInfo={emailKeyInfo} />
     </div>
   )
 }
