@@ -161,6 +161,30 @@ export default function CloudflareR2Guide() {
           <p>
             This only allows uploads coming from vividdit.com — nothing else.
           </p>
+          <div className="rounded-lg border border-amber-500/40 bg-amber-50 p-3 text-foreground dark:bg-amber-950/30">
+            <p className="font-medium">
+              Getting &quot;An error occurred while updating the CORS Policy&quot;?
+            </p>
+            <ul className="mt-1 list-disc pl-5">
+              <li>
+                The origin must be exactly{" "}
+                <code className="rounded bg-muted px-1">https://vividdit.com</code>{" "}
+                — <strong>no trailing slash</strong> and no path. A single extra
+                &quot;/&quot; causes this error.
+              </li>
+              <li>
+                Clear the editor completely, then paste the block above fresh
+                (stray or duplicated text breaks it).
+              </li>
+              <li>
+                Make sure the quotes are straight <code>&quot;</code> (not curly).
+              </li>
+              <li>
+                Cloudflare&apos;s panel is occasionally flaky here — hard-refresh
+                and click Save once more.
+              </li>
+            </ul>
+          </div>
         </Step>
 
         <Step n={7} title="Paste it all into Vividdit">
