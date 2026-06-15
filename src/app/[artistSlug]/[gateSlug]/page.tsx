@@ -4,6 +4,7 @@ import { notFound } from "next/navigation"
 
 import { TrackingPixels } from "@/app/[artistSlug]/[gateSlug]/tracking-pixels"
 import { UnlockPanel } from "@/app/[artistSlug]/[gateSlug]/unlock-panel"
+import { muted, readableForeground } from "@/lib/colors"
 import { soundcloudPlayerSrc } from "@/lib/soundcloud"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { createClient } from "@/lib/supabase/server"
@@ -104,8 +105,14 @@ export default async function GatePage({
   if (!data) notFound()
 
   const { profile, gate, requirements, followTargets } = data
-  const theme = (gate.theme ?? {}) as { accentColor?: string; artworkUrl?: string }
+  const theme = (gate.theme ?? {}) as {
+    accentColor?: string
+    backgroundColor?: string
+    artworkUrl?: string
+  }
   const accent = theme.accentColor ?? "#18181b"
+  const background = theme.backgroundColor ?? "#0a0a0a"
+  const fg = readableForeground(background)
   const cover = coverUrl(gate)
   const tracking = {
     facebookPixelId: null,
@@ -119,39 +126,41 @@ export default async function GatePage({
   await recordViewEvent(gate.id, sp, headerList.get("referer"))
 
   return (
-    <main className="mx-auto flex w-full max-w-xl flex-1 flex-col gap-6 px-4 py-10">
-      <header className="flex items-center gap-4">
+    <main
+      className="flex min-h-svh flex-col items-center px-4 py-10"
+      style={{ backgroundColor: background, color: fg }}
+    >
+      <div className="flex w-full max-w-md flex-1 flex-col gap-6">
         {cover && (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={cover}
             alt={`${gate.title} cover art`}
-            className="size-20 rounded-lg object-cover"
+            className="aspect-square w-full rounded-2xl object-cover shadow-2xl"
           />
         )}
-        <div className="min-w-0">
+        <div className="text-center">
           <p
             className="text-xs font-medium tracking-widest uppercase"
             style={{ color: accent }}
           >
             Free download
           </p>
-          <h1 className="truncate text-xl font-semibold">{gate.title}</h1>
-          <p className="truncate text-muted-foreground">{gate.artist}</p>
+          <h1 className="text-2xl font-bold">{gate.title}</h1>
+          <p style={{ color: muted(fg, 0.7) }}>{gate.artist}</p>
         </div>
-      </header>
 
-      <iframe
-        title={`${gate.title} on SoundCloud`}
-        width="100%"
-        height="166"
-        scrolling="no"
-        frameBorder="no"
-        allow="autoplay"
-        src={soundcloudPlayerSrc(gate.soundcloud_url)}
-      />
+        <iframe
+          title={`${gate.title} on SoundCloud`}
+          width="100%"
+          height="120"
+          scrolling="no"
+          frameBorder="no"
+          allow="autoplay"
+          src={soundcloudPlayerSrc(gate.soundcloud_url)}
+        />
 
-      <UnlockPanel
+        <UnlockPanel
         gateId={gate.id}
         accent={accent}
         requirements={{
@@ -173,11 +182,15 @@ export default async function GatePage({
           artistName: profile.artist_name ?? gate.artist,
         }}
         tracking={tracking}
-      />
+        />
 
-      <footer className="mt-auto pt-8 text-center text-xs text-muted-foreground">
-        Powered by Vividdit
-      </footer>
+        <footer
+          className="mt-auto pt-8 text-center text-xs"
+          style={{ color: muted(fg, 0.5) }}
+        >
+          Powered by Vividdit
+        </footer>
+      </div>
 
       <TrackingPixels tracking={tracking} accent={accent} />
     </main>

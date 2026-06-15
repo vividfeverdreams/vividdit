@@ -7,6 +7,7 @@ import { useState, useTransition } from "react"
 import {
   checkSlugAction,
   createGateAction,
+  extractPaletteAction,
   getHqUploadTargetAction,
   resolveTrackAction,
 } from "@/app/dashboard/gates/new/actions"
@@ -23,6 +24,7 @@ import {
   uploadToPresignedUrl,
   type HqUploadResult,
 } from "@/lib/uploads"
+import { muted, readableForeground } from "@/lib/colors"
 import { slugify, slugRegex } from "@/lib/validation"
 
 type Asset = HqUploadResult & { storageProvider: "supabase" | "r2" }
@@ -70,9 +72,12 @@ export function GateWizard({
 
   // Step 3 — design
   const [accentColor, setAccentColor] = useState("#18181b")
+  const [backgroundColor, setBackgroundColor] = useState("#0a0a0a")
   const [coverPath, setCoverPath] = useState<string | null>(null)
   const [coverPreview, setCoverPreview] = useState<string | null>(null)
   const [coverUploading, setCoverUploading] = useState(false)
+  const [pullingColors, setPullingColors] = useState(false)
+  const [dragOver, setDragOver] = useState(false)
 
   // Step 3 — tracking pixels (optional)
   const [showTracking, setShowTracking] = useState(false)
@@ -119,7 +124,32 @@ export function GateWizard({
       if (!slugTouched) {
         setSlug(slugify(result.title))
       }
+      // Auto-suggest theme colors from the cover art.
+      if (result.artworkUrl) {
+        const palette = await extractPaletteAction(result.artworkUrl)
+        if (palette) {
+          setAccentColor(palette.accent)
+          setBackgroundColor(palette.background)
+        }
+      }
     })
+  }
+
+  const pullColorsFromCover = async () => {
+    const url = coverPath
+      ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/covers/${coverPath}`
+      : track?.artworkUrl
+    if (!url) return
+    setPullingColors(true)
+    try {
+      const palette = await extractPaletteAction(url)
+      if (palette) {
+        setAccentColor(palette.accent)
+        setBackgroundColor(palette.background)
+      }
+    } finally {
+      setPullingColors(false)
+    }
   }
 
   const onHqFile = async (file: File | undefined) => {
@@ -195,6 +225,7 @@ export function GateWizard({
         slug,
         artworkUrl: track.artworkUrl,
         accentColor,
+        backgroundColor,
         coverPath,
         emailEnabled,
         requireLike,
@@ -322,12 +353,36 @@ export function GateWizard({
           {step === 1 && (
             <div className="space-y-3">
               <Label htmlFor="hqFile">HQ download file (WAV, AIFF, ZIP — up to 500MB)</Label>
+              <label
+                htmlFor="hqFile"
+                onDragOver={(e) => {
+                  e.preventDefault()
+                  setDragOver(true)
+                }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  setDragOver(false)
+                  if (uploadPercent === null) onHqFile(e.dataTransfer.files?.[0])
+                }}
+                className={`flex cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed p-8 text-center text-sm transition-colors ${
+                  dragOver
+                    ? "border-primary bg-muted"
+                    : "border-input hover:bg-muted/50"
+                }`}
+              >
+                <span className="font-medium">
+                  Drag &amp; drop your file here
+                </span>
+                <span className="text-muted-foreground">or click to browse</span>
+              </label>
               <Input
                 id="hqFile"
                 type="file"
                 accept={HQ_ACCEPT}
                 onChange={(e) => onHqFile(e.target.files?.[0])}
                 disabled={uploadPercent !== null}
+                className="sr-only"
               />
               {uploadPercent !== null && (
                 <div className="space-y-1">
@@ -354,19 +409,44 @@ export function GateWizard({
 
           {step === 2 && (
             <div className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="accent">Accent color</Label>
-                <div className="flex items-center gap-2">
-                  <input
-                    id="accent"
-                    type="color"
-                    value={accentColor}
-                    onChange={(e) => setAccentColor(e.target.value)}
-                    className="size-8 cursor-pointer rounded border"
-                  />
-                  <span className="font-mono text-sm">{accentColor}</span>
+              <div className="flex flex-wrap gap-6">
+                <div className="space-y-2">
+                  <Label htmlFor="accent">Accent color</Label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      id="accent"
+                      type="color"
+                      value={accentColor}
+                      onChange={(e) => setAccentColor(e.target.value)}
+                      className="size-8 cursor-pointer rounded border"
+                    />
+                    <span className="font-mono text-sm">{accentColor}</span>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="bg">Background color</Label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      id="bg"
+                      type="color"
+                      value={backgroundColor}
+                      onChange={(e) => setBackgroundColor(e.target.value)}
+                      className="size-8 cursor-pointer rounded border"
+                    />
+                    <span className="font-mono text-sm">{backgroundColor}</span>
+                  </div>
                 </div>
               </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={pullColorsFromCover}
+                disabled={pullingColors || (!coverPath && !track?.artworkUrl)}
+              >
+                {pullingColors ? "Reading cover…" : "🎨 Pull colors from cover art"}
+              </Button>
+
               <div className="space-y-2">
                 <Label htmlFor="cover">Custom cover image (optional)</Label>
                 <Input
@@ -387,6 +467,7 @@ export function GateWizard({
                 <Label>Live preview</Label>
                 <GatePreview
                   accent={accentColor}
+                  background={backgroundColor}
                   coverUrl={coverPreview ?? track?.artworkUrl ?? null}
                   title={track?.title ?? "Your track title"}
                   artist={track?.artist ?? "Artist"}
@@ -698,55 +779,51 @@ function FollowList({
 
 function GatePreview({
   accent,
+  background,
   coverUrl,
   title,
   artist,
 }: {
   accent: string
+  background: string
   coverUrl: string | null
   title: string
   artist: string
 }) {
+  const fg = readableForeground(background)
   return (
-    <div className="mx-auto w-full max-w-xs overflow-hidden rounded-xl border bg-background shadow-sm">
+    <div
+      className="mx-auto w-full max-w-xs overflow-hidden rounded-xl border shadow-sm"
+      style={{ backgroundColor: background, color: fg }}
+    >
       <div className="space-y-3 p-4">
-        <div className="flex items-center gap-3">
-          {coverUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={coverUrl}
-              alt=""
-              className="size-12 rounded-md object-cover"
-            />
-          ) : (
-            <div className="size-12 rounded-md bg-muted" />
-          )}
-          <div className="min-w-0">
-            <p
-              className="text-[10px] font-medium tracking-widest uppercase"
-              style={{ color: accent }}
-            >
-              Free download
-            </p>
-            <p className="truncate text-sm font-semibold">{title}</p>
-            <p className="truncate text-xs text-muted-foreground">{artist}</p>
-          </div>
-        </div>
+        {/* big cover */}
+        {coverUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={coverUrl}
+            alt=""
+            className="aspect-square w-full rounded-lg object-cover"
+          />
+        ) : (
+          <div className="aspect-square w-full rounded-lg bg-white/10" />
+        )}
 
-        {/* faux SoundCloud player */}
-        <div className="flex items-center gap-2 rounded-md bg-muted px-2 py-2">
-          <div
-            className="flex size-5 items-center justify-center rounded-full text-[8px] text-white"
-            style={{ backgroundColor: accent }}
+        <div className="min-w-0">
+          <p
+            className="text-[10px] font-medium tracking-widest uppercase"
+            style={{ color: accent }}
           >
-            ▶
-          </div>
-          <div className="h-1 flex-1 rounded bg-foreground/15" />
+            Free download
+          </p>
+          <p className="truncate text-sm font-semibold">{title}</p>
+          <p className="truncate text-xs" style={{ color: muted(fg, 0.65) }}>
+            {artist}
+          </p>
         </div>
 
         {/* unlock card */}
-        <div className="space-y-2 rounded-lg border p-3">
-          <div className="h-1 w-full rounded bg-foreground/10" />
+        <div className="space-y-2 rounded-lg bg-white p-3 text-zinc-900">
           <p className="text-xs font-medium">Unlock the HQ download</p>
           <div
             className="flex h-8 items-center justify-center rounded-md text-xs font-medium text-white"

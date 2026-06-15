@@ -96,8 +96,9 @@ export async function resolveSoundcloudTrack(
 export function soundcloudPlayerSrc(trackUrl: string): string {
   const params = new URLSearchParams({
     url: trackUrl,
-    visual: "true",
-    show_artwork: "true",
+    // Compact player — the gate page features the cover art separately.
+    visual: "false",
+    show_artwork: "false",
   })
   return `https://w.soundcloud.com/player/?${params.toString()}`
 }

@@ -5,6 +5,7 @@ import { z } from "zod"
 
 import { hasValidOpenAiKey } from "@/lib/ai-keys"
 import { FREE_GATE_LIMIT } from "@/lib/limits"
+import { extractPalette, type Palette } from "@/lib/palette"
 import { isHttpUrl, profileLabel } from "@/lib/profiles"
 import { resolveSoundcloudTrack, type SoundcloudTrack } from "@/lib/soundcloud"
 import { hasValidR2, presignR2Upload } from "@/lib/storage"
@@ -48,6 +49,18 @@ export async function resolveTrackAction(
   return resolveSoundcloudTrack(url)
 }
 
+export async function extractPaletteAction(
+  imageUrl: string
+): Promise<Palette | null> {
+  const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) return null
+  if (!isHttpUrl(imageUrl)) return null
+  return extractPalette(imageUrl)
+}
+
 export async function checkSlugAction(
   slug: string
 ): Promise<{ available: boolean }> {
@@ -81,6 +94,10 @@ const createGateSchema = z.object({
     .string()
     .regex(/^#[0-9a-fA-F]{6}$/, "Pick a valid color")
     .default("#18181b"),
+  backgroundColor: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/, "Pick a valid color")
+    .default("#0a0a0a"),
   coverPath: z.string().nullable(),
   emailEnabled: z.boolean(),
   requireLike: z.boolean(),
@@ -190,7 +207,11 @@ export async function createGateAction(
       slug: d.slug,
       status: d.publish ? "published" : "draft",
       cover_path: d.coverPath,
-      theme: { accentColor: d.accentColor, artworkUrl: d.artworkUrl },
+      theme: {
+        accentColor: d.accentColor,
+        backgroundColor: d.backgroundColor,
+        artworkUrl: d.artworkUrl,
+      },
       tracking: {
         facebookPixelId: d.tracking.facebookPixelId,
         googleAdsTagId: d.tracking.googleAdsTagId,
