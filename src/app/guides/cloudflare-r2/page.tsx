@@ -126,11 +126,13 @@ export default function CloudflareR2Guide() {
               Name it anything (e.g. <code className="rounded bg-muted px-1">vividdit</code>).
             </li>
             <li>
-              Permission: choose <strong>Object Read &amp; Write</strong>.
+              Permission: choose <strong>Admin Read &amp; Write</strong>. This
+              lets Vividdit set up uploads for you automatically — so you can
+              skip the CORS step entirely.
             </li>
             <li>
-              Scope: you can apply it to <strong>all buckets</strong> or just the
-              bucket you made — either works.
+              Scope: apply it to <strong>just the bucket you made</strong>
+              (recommended) or all buckets — either works.
             </li>
             <li>Leave the other options as default and create the token.</li>
           </ul>
@@ -148,43 +150,35 @@ export default function CloudflareR2Guide() {
           </p>
         </Step>
 
-        <Step n={6} title="Allow uploads from Vividdit (CORS)">
+        <Step n={6} title="Uploads (CORS) — handled automatically ✨">
           <p>
-            So fans&apos; browsers can upload to your bucket, open your bucket →{" "}
-            <strong>Settings</strong> → scroll to <strong>CORS policy</strong> →{" "}
-            <strong>Edit / Add CORS policy</strong>, and paste this exactly, then
-            save:
+            Good news: if you used an <strong>Admin Read &amp; Write</strong>{" "}
+            token in step 5, you can <strong>skip this</strong> — Vividdit sets
+            the upload permissions (CORS) for you automatically when you click
+            Test in the next step.
           </p>
-          <pre className="overflow-x-auto rounded-lg border bg-muted p-3 text-xs text-foreground">
-            {CORS_JSON}
-          </pre>
-          <p>
-            This only allows uploads coming from vividdit.com — nothing else.
-          </p>
-          <div className="rounded-lg border border-amber-500/40 bg-amber-50 p-3 text-foreground dark:bg-amber-950/30">
-            <p className="font-medium">
-              Getting &quot;An error occurred while updating the CORS Policy&quot;?
-            </p>
-            <ul className="mt-1 list-disc pl-5">
-              <li>
-                The origin must be exactly{" "}
+          <details className="rounded-lg border p-3">
+            <summary className="cursor-pointer font-medium">
+              Only if you used a least-privilege &quot;Object&quot; token: set CORS manually
+            </summary>
+            <div className="mt-2 space-y-2">
+              <p>
+                Open your bucket → <strong>Settings</strong> →{" "}
+                <strong>CORS policy</strong> → <strong>Add</strong>, paste this
+                exactly, and save:
+              </p>
+              <pre className="overflow-x-auto rounded-lg border bg-muted p-3 text-xs text-foreground">
+                {CORS_JSON}
+              </pre>
+              <p>
+                If Cloudflare shows &quot;An error occurred&quot;: the origin must
+                be exactly{" "}
                 <code className="rounded bg-muted px-1">https://vividdit.com</code>{" "}
-                — <strong>no trailing slash</strong> and no path. A single extra
-                &quot;/&quot; causes this error.
-              </li>
-              <li>
-                Clear the editor completely, then paste the block above fresh
-                (stray or duplicated text breaks it).
-              </li>
-              <li>
-                Make sure the quotes are straight <code>&quot;</code> (not curly).
-              </li>
-              <li>
-                Cloudflare&apos;s panel is occasionally flaky here — hard-refresh
-                and click Save once more.
-              </li>
-            </ul>
-          </div>
+                (no trailing slash), quotes must be straight, and the panel is
+                occasionally flaky — hard-refresh and retry.
+              </p>
+            </div>
+          </details>
         </Step>
 
         <Step n={7} title="Paste it all into Vividdit">
@@ -200,7 +194,8 @@ export default function CloudflareR2Guide() {
             <li>Public domain → leave blank (optional, advanced)</li>
           </ul>
           <p>
-            Click <strong>Save</strong>, then <strong>Test</strong>. If it says{" "}
+            Click <strong>Save</strong>, then <strong>Test</strong>. Vividdit
+            checks your bucket and automatically configures uploads. If it says{" "}
             <strong>Connected</strong>, you&apos;re done — unlimited gates on your
             own storage. 🎉
           </p>

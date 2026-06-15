@@ -90,8 +90,21 @@ export function StorageSection({
               </Button>
             </form>
           </div>
-          {info.status === "invalid" && info.lastError && (
-            <p className="w-full text-destructive">{info.lastError}</p>
+          {info.lastError && (
+            <p
+              className={
+                info.status === "valid"
+                  ? "w-full text-amber-600 dark:text-amber-500"
+                  : "w-full text-destructive"
+              }
+            >
+              {info.lastError}
+            </p>
+          )}
+          {info.status === "valid" && !info.lastError && (
+            <p className="w-full text-muted-foreground">
+              ✓ Uploads are configured automatically — you&apos;re all set.
+            </p>
           )}
         </div>
       )}
@@ -106,6 +119,11 @@ export function StorageSection({
 
       {open && (
         <form action={saveAction} className="space-y-3 rounded-lg border p-4">
+          <p className="text-xs text-muted-foreground">
+            Create your R2 API token with <strong>Admin Read &amp; Write</strong>{" "}
+            permission — that lets Vividdit set up uploads for you automatically,
+            so you never have to configure CORS by hand.
+          </p>
           <div className="space-y-2">
             <Label htmlFor="accountId">Cloudflare account ID</Label>
             <Input id="accountId" name="accountId" required />

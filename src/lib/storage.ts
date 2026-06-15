@@ -1,9 +1,17 @@
 import "server-only"
 
+import { createHash } from "node:crypto"
 import { AwsClient } from "aws4fetch"
 
 import { decryptSecret, encryptSecret } from "@/lib/crypto"
 import { createAdminClient } from "@/lib/supabase/admin"
+
+function siteOrigin(): string {
+  return (process.env.NEXT_PUBLIC_SITE_URL ?? "https://vividdit.com").replace(
+    /\/$/,
+    ""
+  )
+}
 
 // BYO Cloudflare R2 storage for HQ files. R2 is S3-compatible; we sign
 // requests with SigV4 (aws4fetch). Creds are encrypted at rest, service-role
@@ -129,7 +137,34 @@ export async function removeR2(creatorId: string) {
     .eq("provider", "r2")
 }
 
-/** Validates R2 creds by listing the bucket (1 key). Persists the result. */
+/**
+ * Sets the bucket's CORS policy so fans' browsers can upload directly. Needs
+ * an "Admin Read & Write" token (bucket-config permission). Returns the HTTP
+ * status so the caller can guide the creator if their token can't do it.
+ */
+async function putBucketCors(creds: R2Creds): Promise<number> {
+  const origin = siteOrigin()
+  const body =
+    `<CORSConfiguration><CORSRule>` +
+    `<AllowedOrigin>${origin}</AllowedOrigin>` +
+    `<AllowedMethod>GET</AllowedMethod><AllowedMethod>PUT</AllowedMethod>` +
+    `<AllowedHeader>*</AllowedHeader><MaxAgeSeconds>3600</MaxAgeSeconds>` +
+    `</CORSRule></CORSConfiguration>`
+  const contentMd5 = createHash("md5").update(body).digest("base64")
+  const url = `https://${creds.accountId}.r2.cloudflarestorage.com/${creds.bucket}?cors`
+  const res = await client(creds).fetch(url, {
+    method: "PUT",
+    body,
+    headers: { "Content-Type": "application/xml", "Content-MD5": contentMd5 },
+    signal: AbortSignal.timeout(15_000),
+  })
+  return res.status
+}
+
+/**
+ * Validates R2 creds (lists the bucket) AND auto-configures the upload CORS
+ * policy so creators never touch Cloudflare's CORS panel. Persists the result.
+ */
 export async function testR2(creatorId: string): Promise<R2Info | null> {
   const creds = await getCreds(creatorId)
   if (!creds) return null
@@ -144,6 +179,19 @@ export async function testR2(creatorId: string): Promise<R2Info | null> {
     })
     if (res.ok) {
       status = "valid"
+      // Creds work — now auto-set CORS so browser uploads succeed.
+      try {
+        const corsStatus = await putBucketCors(creds)
+        if (corsStatus !== 200 && corsStatus !== 204) {
+          lastError =
+            corsStatus === 403
+              ? "Connected, but Vividdit couldn't auto-set up uploads — your R2 token needs the “Admin Read & Write” permission. Recreate the token with that permission and Test again (or set the CORS policy manually — see the guide)."
+              : `Connected, but auto-configuring uploads returned HTTP ${corsStatus}. Set the CORS policy manually — see the guide.`
+        }
+      } catch {
+        lastError =
+          "Connected, but couldn't auto-configure uploads. Set the CORS policy manually — see the guide."
+      }
     } else if (res.status === 403) {
       lastError = "Access denied — check the access key, secret, and bucket."
     } else if (res.status === 404) {
