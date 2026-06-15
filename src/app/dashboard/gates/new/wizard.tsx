@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { useState, useTransition } from "react"
+import { useEffect, useState, useTransition } from "react"
 
 import {
   checkSlugAction,
@@ -30,6 +30,8 @@ import { slugify, slugRegex } from "@/lib/validation"
 type Asset = HqUploadResult & { storageProvider: "supabase" | "r2" }
 
 const STEPS = ["Track", "File", "Design", "Unlock", "Publish"] as const
+
+const DISCLAIMER_DISMISSED_KEY = "vividdit_gate_tos_disclaimer_dismissed"
 
 const HQ_ACCEPT = ".wav,.aiff,.aif,.zip,.mp3,.flac"
 const HQ_MAX_BYTES = 500 * 1024 * 1024
@@ -60,6 +62,30 @@ export function GateWizard({
   const router = useRouter()
   const [step, setStep] = useState(0)
   const [error, setError] = useState<string | null>(null)
+
+  // Platform-ToS disclaimer shown at the start of gate creation. Artists can
+  // permanently dismiss it ("don't show again", remembered in localStorage).
+  const [showDisclaimer, setShowDisclaimer] = useState(false)
+  const [dontShowDisclaimer, setDontShowDisclaimer] = useState(false)
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(DISCLAIMER_DISMISSED_KEY) !== "1") {
+        setShowDisclaimer(true)
+      }
+    } catch {
+      setShowDisclaimer(true)
+    }
+  }, [])
+  const dismissDisclaimer = () => {
+    if (dontShowDisclaimer) {
+      try {
+        localStorage.setItem(DISCLAIMER_DISMISSED_KEY, "1")
+      } catch {
+        // ignore — disclaimer will simply show again next time
+      }
+    }
+    setShowDisclaimer(false)
+  }
 
   // Step 1 — track
   const [urlInput, setUrlInput] = useState("")
@@ -279,6 +305,34 @@ export function GateWizard({
 
   return (
     <div className="space-y-6">
+      {showDisclaimer && (
+        <div className="rounded-lg border border-amber-500/40 bg-amber-50 p-4 text-sm dark:bg-amber-950/20">
+          <p className="font-medium">Before you build a gate — a note on platform rules</p>
+          <p className="mt-1 text-muted-foreground">
+            SoundCloud, Instagram, and Spotify each have their own Terms of
+            Service, and some restrict incentivizing follows, likes, or reposts
+            in exchange for downloads. Vividdit gives you the tools — how you use
+            them is up to you. Please review each platform&apos;s current terms
+            and proceed at your own risk. Vividdit is not affiliated with,
+            endorsed by, or sponsored by SoundCloud, Instagram, or Spotify.
+          </p>
+          <label className="mt-3 flex items-center gap-2 text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={dontShowDisclaimer}
+              onChange={(e) => setDontShowDisclaimer(e.target.checked)}
+              className="size-4"
+            />
+            Don&apos;t show this again
+          </label>
+          <div className="mt-3">
+            <Button size="sm" onClick={dismissDisclaimer}>
+              Got it
+            </Button>
+          </div>
+        </div>
+      )}
+
       <ol className="flex gap-2 text-sm">
         {STEPS.map((label, i) => (
           <li
@@ -633,6 +687,13 @@ export function GateWizard({
                   own={ownProfiles.spotify}
                 />
               </div>
+
+              <p className="border-t pt-3 text-xs text-muted-foreground">
+                ⚠ Heads up: some platforms restrict requiring follows, likes, or
+                reposts in exchange for a download. Review each platform&apos;s
+                Terms of Service and proceed at your own risk. Vividdit is not
+                affiliated with SoundCloud, Instagram, or Spotify.
+              </p>
             </div>
           )}
 
