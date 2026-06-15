@@ -1,7 +1,5 @@
 import "server-only"
 
-import sharp from "sharp"
-
 // Suggests a page background + accent color from cover art. background = a
 // deep, darkened version of the dominant color (moody, readable with light
 // text); accent = the most vibrant pixel (good for buttons).
@@ -27,6 +25,10 @@ export type Palette = { background: string; accent: string }
 
 export async function extractPalette(imageUrl: string): Promise<Palette | null> {
   try {
+    // Import lazily inside the try: if sharp's native binary fails to load in
+    // the serverless bundle, we degrade to "no auto colors" instead of a 500.
+    const { default: sharp } = await import("sharp")
+
     const res = await fetch(imageUrl, { signal: AbortSignal.timeout(10_000) })
     if (!res.ok) return null
     const buf = Buffer.from(await res.arrayBuffer())

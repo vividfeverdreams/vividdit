@@ -124,12 +124,17 @@ export function GateWizard({
       if (!slugTouched) {
         setSlug(slugify(result.title))
       }
-      // Auto-suggest theme colors from the cover art.
+      // Auto-suggest theme colors from the cover art — best-effort, must
+      // never block track resolution.
       if (result.artworkUrl) {
-        const palette = await extractPaletteAction(result.artworkUrl)
-        if (palette) {
-          setAccentColor(palette.accent)
-          setBackgroundColor(palette.background)
+        try {
+          const palette = await extractPaletteAction(result.artworkUrl)
+          if (palette) {
+            setAccentColor(palette.accent)
+            setBackgroundColor(palette.background)
+          }
+        } catch {
+          // ignore — artist can pick colors manually
         }
       }
     })
@@ -147,6 +152,8 @@ export function GateWizard({
         setAccentColor(palette.accent)
         setBackgroundColor(palette.background)
       }
+    } catch {
+      // ignore — colors are optional
     } finally {
       setPullingColors(false)
     }
