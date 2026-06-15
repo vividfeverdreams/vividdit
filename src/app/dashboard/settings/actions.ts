@@ -248,6 +248,14 @@ export async function removeR2Action(
   return { error: null, success: "R2 storage removed." }
 }
 
+const optionalUrl = z
+  .string()
+  .trim()
+  .max(300)
+  .optional()
+  .transform((v) => v || null)
+  .refine((v) => !v || /^https?:\/\//.test(v), "Enter a valid URL")
+
 const profileSchema = z.object({
   artistName: z.string().trim().min(1, "Enter your artist name").max(100),
   soundcloudProfileUrl: z
@@ -263,6 +271,8 @@ const profileSchema = z.object({
       },
       { message: "Must be a soundcloud.com profile URL" }
     ),
+  instagramUrl: optionalUrl,
+  spotifyUrl: optionalUrl,
 })
 
 export async function updateProfileAction(
@@ -275,6 +285,8 @@ export async function updateProfileAction(
   const parsed = profileSchema.safeParse({
     artistName: formData.get("artistName"),
     soundcloudProfileUrl: formData.get("soundcloudProfileUrl"),
+    instagramUrl: formData.get("instagramUrl") || undefined,
+    spotifyUrl: formData.get("spotifyUrl") || undefined,
   })
   if (!parsed.success) {
     return { error: parsed.error.issues[0].message, success: null }
@@ -286,6 +298,8 @@ export async function updateProfileAction(
     .update({
       artist_name: parsed.data.artistName,
       soundcloud_profile_url: parsed.data.soundcloudProfileUrl,
+      instagram_url: parsed.data.instagramUrl,
+      spotify_url: parsed.data.spotifyUrl,
     })
     .eq("id", user.id)
 

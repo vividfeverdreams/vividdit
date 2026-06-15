@@ -85,7 +85,7 @@ export function GateWizard({
   const [emailEnabled, setEmailEnabled] = useState(true)
   const [requireLike, setRequireLike] = useState(false)
   const [requireRepost, setRequireRepost] = useState(false)
-  const [requireProofCode, setRequireProofCode] = useState(true)
+  const [requireProofCode, setRequireProofCode] = useState(false)
   // Multiple follow profiles per platform (each becomes a fan step).
   const [scFollows, setScFollows] = useState<string[]>([])
   const [igFollows, setIgFollows] = useState<string[]>([])

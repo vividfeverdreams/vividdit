@@ -25,7 +25,9 @@ export default async function SettingsPage() {
   const [{ data: profile }, keyInfo, emailKeyInfo, r2Info] = await Promise.all([
     supabase
       .from("profiles")
-      .select("artist_name, artist_slug, soundcloud_profile_url")
+      .select(
+        "artist_name, artist_slug, soundcloud_profile_url, instagram_url, spotify_url"
+      )
       .eq("id", user.id)
       .single(),
     getAiKeyInfo(user.id),
@@ -41,6 +43,8 @@ export default async function SettingsPage() {
           artistName: profile?.artist_name ?? "",
           artistSlug: profile?.artist_slug ?? "",
           soundcloudProfileUrl: profile?.soundcloud_profile_url ?? "",
+          instagramUrl: profile?.instagram_url ?? "",
+          spotifyUrl: profile?.spotify_url ?? "",
         }}
       />
       <Separator />

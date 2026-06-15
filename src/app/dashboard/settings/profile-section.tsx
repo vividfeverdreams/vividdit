@@ -20,6 +20,8 @@ export function ProfileSection({
     artistName: string
     artistSlug: string
     soundcloudProfileUrl: string
+    instagramUrl: string
+    spotifyUrl: string
   }
 }) {
   const [state, formAction, pending] = useActionState(
@@ -69,6 +71,30 @@ export function ProfileSection({
             required
           />
         </div>
+        <div className="space-y-2">
+          <Label htmlFor="instagramUrl">Instagram profile URL</Label>
+          <Input
+            id="instagramUrl"
+            name="instagramUrl"
+            type="url"
+            defaultValue={profile.instagramUrl}
+            placeholder="https://instagram.com/your-handle"
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="spotifyUrl">Spotify artist URL</Label>
+          <Input
+            id="spotifyUrl"
+            name="spotifyUrl"
+            type="url"
+            defaultValue={profile.spotifyUrl}
+            placeholder="https://open.spotify.com/artist/…"
+          />
+        </div>
+        <p className="text-xs text-muted-foreground">
+          These save to your account and auto-fill as one-click options when you
+          build a gate.
+        </p>
         <Button type="submit" disabled={pending}>
           {pending ? "Saving…" : "Save profile"}
         </Button>
