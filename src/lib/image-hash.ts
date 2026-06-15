@@ -1,7 +1,6 @@
 import "server-only"
 
 import { createHash } from "node:crypto"
-import sharp from "sharp"
 
 /** SHA-256 of the raw bytes — exact-duplicate detection. */
 export function exactHash(buffer: Buffer): string {
@@ -11,9 +10,20 @@ export function exactHash(buffer: Buffer): string {
 /**
  * 64-bit difference hash (dHash) — near-duplicate detection. Resilient to
  * re-encoding/resizing; small Hamming distance means visually similar images.
- * Also serves as image validation: sharp throws on non-image bytes.
+ *
+ * Returns null when sharp's native binary can't load in the runtime, so
+ * near-duplicate fraud detection degrades gracefully rather than taking down
+ * the whole upload route. Decode failures on genuinely invalid images still
+ * throw (callers treat that as "not a valid image").
  */
-export async function perceptualHash(buffer: Buffer): Promise<string> {
+export async function perceptualHash(buffer: Buffer): Promise<string | null> {
+  let sharp
+  try {
+    sharp = (await import("sharp")).default
+  } catch {
+    return null
+  }
+
   const { data } = await sharp(buffer)
     .grayscale()
     .resize(9, 8, { fit: "fill" })
