@@ -9,6 +9,12 @@ import {
   testKeyAction,
   type SettingsFormState,
 } from "@/app/dashboard/settings/actions"
+import {
+  OPENROUTER_SUGGESTED_MODELS,
+  PROVIDER_LABELS,
+  VERIFICATION_MODELS,
+  type AiProvider,
+} from "@/lib/ai-models"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -25,16 +31,15 @@ function StatusBadge({ status }: { status: string }) {
 
 export function OpenAiKeySection({
   keyInfo,
-  models,
 }: {
   keyInfo: {
+    provider: AiProvider
     keyHint: string | null
     keyStatus: string
     model: string
     lastTestedAt: string | null
     lastError: string | null
   } | null
-  models: readonly string[]
 }) {
   const [saveState, saveFormAction, savePending] = useActionState(
     saveKeyAction,
@@ -58,22 +63,47 @@ export function OpenAiKeySection({
     (s) => s.error || s.success
   )
 
+  const isOpenRouter = keyInfo?.provider === "openrouter"
+
   return (
     <section className="space-y-4">
       <div>
-        <h2 className="text-lg font-medium">OpenAI API key</h2>
+        <h2 className="text-lg font-medium">Verification API key</h2>
         <p className="text-sm text-muted-foreground">
           Used to verify fan proof screenshots with AI. Required before
-          publishing a SoundCloud gate; email-only gates work without it. Your
-          key is encrypted at rest and never sent to the browser.{" "}
+          publishing a SoundCloud gate; email-only gates work without it. Paste
+          an <strong>OpenAI</strong> key (<code className="rounded bg-muted px-1">sk-…</code>){" "}
+          or an{" "}
+          <a
+            href="https://openrouter.ai/"
+            target="_blank"
+            rel="noreferrer"
+            className="font-medium text-foreground underline"
+          >
+            OpenRouter
+          </a>{" "}
+          key (<code className="rounded bg-muted px-1">sk-or-…</code>) — OpenRouter
+          lets you use many different models (Gemini, Claude, GPT, etc.) with one
+          key. Your key is encrypted at rest and never sent to the browser. New
+          to this? Step-by-step guides:{" "}
           <a
             href="/guides/openai-api-key"
             target="_blank"
             rel="noreferrer"
             className="font-medium text-foreground underline"
           >
-            New to OpenAI? Follow the step-by-step setup guide →
+            OpenAI
+          </a>{" "}
+          ·{" "}
+          <a
+            href="/guides/openrouter"
+            target="_blank"
+            rel="noreferrer"
+            className="font-medium text-foreground underline"
+          >
+            OpenRouter
           </a>
+          .
         </p>
       </div>
 
@@ -86,6 +116,7 @@ export function OpenAiKeySection({
       {keyInfo && (
         <div className="flex flex-wrap items-center gap-3 rounded-lg border p-4 text-sm">
           <StatusBadge status={keyInfo.keyStatus} />
+          <Badge variant="outline">{PROVIDER_LABELS[keyInfo.provider]}</Badge>
           <span className="font-mono">{keyInfo.keyHint}</span>
           {keyInfo.lastTestedAt && (
             <span className="text-muted-foreground">
@@ -117,14 +148,14 @@ export function OpenAiKeySection({
 
       <form action={saveFormAction} className="space-y-2">
         <Label htmlFor="apiKey">
-          {keyInfo ? "Replace key" : "Add your OpenAI API key"}
+          {keyInfo ? "Replace key" : "Add your OpenAI or OpenRouter API key"}
         </Label>
         <div className="flex gap-2">
           <Input
             id="apiKey"
             name="apiKey"
             type="password"
-            placeholder="sk-…"
+            placeholder="sk-… or sk-or-…"
             autoComplete="off"
             required
           />
@@ -147,19 +178,50 @@ export function OpenAiKeySection({
             <form action={modelFormAction} className="flex items-end gap-2">
               <div className="space-y-2">
                 <Label htmlFor="model">Verification model</Label>
-                <select
-                  id="model"
-                  name="model"
-                  defaultValue={keyInfo.model}
-                  className="h-8 rounded-lg border border-input bg-background px-2.5 text-sm"
-                >
-                  {models.map((m) => (
-                    <option key={m} value={m}>
-                      {m}
-                      {m === "gpt-5.4-mini" ? " (recommended)" : ""}
-                    </option>
-                  ))}
-                </select>
+                {isOpenRouter ? (
+                  <>
+                    <Input
+                      id="model"
+                      name="model"
+                      defaultValue={keyInfo.model}
+                      list="openrouter-models"
+                      placeholder="openai/gpt-4o-mini"
+                      className="w-72 font-mono"
+                    />
+                    <datalist id="openrouter-models">
+                      {OPENROUTER_SUGGESTED_MODELS.map((m) => (
+                        <option key={m} value={m} />
+                      ))}
+                    </datalist>
+                    <p className="text-xs text-muted-foreground">
+                      Any model id from{" "}
+                      <a
+                        href="https://openrouter.ai/models"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="underline"
+                      >
+                        openrouter.ai/models
+                      </a>
+                      . Use a vision model that supports structured output
+                      (OpenAI and Google models work well).
+                    </p>
+                  </>
+                ) : (
+                  <select
+                    id="model"
+                    name="model"
+                    defaultValue={keyInfo.model}
+                    className="h-8 rounded-lg border border-input bg-background px-2.5 text-sm"
+                  >
+                    {VERIFICATION_MODELS.map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                        {m === "gpt-5.4-mini" ? " (recommended)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                )}
               </div>
               <Button type="submit" size="sm" variant="outline" disabled={modelPending}>
                 Save model

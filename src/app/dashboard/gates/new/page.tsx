@@ -2,7 +2,7 @@ import Link from "next/link"
 import { redirect } from "next/navigation"
 
 import { GateWizard } from "@/app/dashboard/gates/new/wizard"
-import { hasValidOpenAiKey } from "@/lib/ai-keys"
+import { hasValidAiKey } from "@/lib/ai-keys"
 import { FREE_GATE_LIMIT } from "@/lib/limits"
 import { hasValidR2 } from "@/lib/storage"
 import { Button } from "@/components/ui/button"
@@ -33,7 +33,7 @@ export default async function NewGatePage() {
       )
       .eq("id", user.id)
       .single(),
-    hasValidOpenAiKey(user.id),
+    hasValidAiKey(user.id),
     hasValidR2(user.id),
     supabase
       .from("gates")

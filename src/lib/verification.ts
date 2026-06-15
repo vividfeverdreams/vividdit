@@ -1,6 +1,7 @@
 import "server-only"
 
-import { getDecryptedOpenAiKey } from "@/lib/ai-keys"
+import { getDecryptedAiKey } from "@/lib/ai-keys"
+import type { AiProvider } from "@/lib/ai-models"
 import { mintDownloadToken } from "@/lib/downloads"
 import { sendDownloadEmail } from "@/lib/email"
 import { createAdminClient } from "@/lib/supabase/admin"
@@ -121,6 +122,119 @@ edited, stitched, or AI-generated images, or a photo of another screen.
 fan_message: short, friendly, specific — tell the fan exactly what to redo.`
 }
 
+// Sends the verification request to the creator's provider and returns the raw
+// structured-output JSON text + token usage. OpenAI uses the Responses API;
+// OpenRouter uses the OpenAI-compatible Chat Completions API.
+async function requestVerification(opts: {
+  provider: AiProvider
+  key: string
+  model: string
+  prompt: string
+  images: string[]
+}): Promise<{
+  text: string
+  usage: { input_tokens?: number; output_tokens?: number }
+}> {
+  const { provider, key, model, prompt, images } = opts
+
+  if (provider === "openrouter") {
+    const response = await fetch(
+      "https://openrouter.ai/api/v1/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${key}`,
+          "Content-Type": "application/json",
+          // OpenRouter attribution headers (optional but recommended).
+          "HTTP-Referer": "https://vividdit.com",
+          "X-Title": "Vividdit",
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            {
+              role: "user",
+              content: [
+                { type: "text", text: prompt },
+                ...images.map((url) => ({
+                  type: "image_url",
+                  image_url: { url },
+                })),
+              ],
+            },
+          ],
+          response_format: {
+            type: "json_schema",
+            json_schema: {
+              name: "gate_verification",
+              strict: true,
+              schema: OUTCOME_SCHEMA,
+            },
+          },
+          max_tokens: 3000,
+        }),
+        signal: AbortSignal.timeout(90_000),
+      }
+    )
+    const body = await response.json()
+    if (!response.ok) {
+      throw new Error(
+        body?.error?.message ?? `OpenRouter returned HTTP ${response.status}`
+      )
+    }
+    const text: string | undefined = body.choices?.[0]?.message?.content
+    if (!text) throw new Error("No structured output in model response")
+    return {
+      text,
+      usage: {
+        input_tokens: body.usage?.prompt_tokens,
+        output_tokens: body.usage?.completion_tokens,
+      },
+    }
+  }
+
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      input: [
+        {
+          role: "user",
+          content: [
+            { type: "input_text", text: prompt },
+            ...images.map((url) => ({ type: "input_image", image_url: url })),
+          ],
+        },
+      ],
+      text: {
+        format: {
+          type: "json_schema",
+          name: "gate_verification",
+          strict: true,
+          schema: OUTCOME_SCHEMA,
+        },
+      },
+      max_output_tokens: 3000,
+    }),
+    signal: AbortSignal.timeout(90_000),
+  })
+  const body = await response.json()
+  if (!response.ok) {
+    throw new Error(
+      body?.error?.message ?? `OpenAI returned HTTP ${response.status}`
+    )
+  }
+  const text: string | undefined = body.output
+    ?.find((o: { type: string }) => o.type === "message")
+    ?.content?.find((c: { type: string }) => c.type === "output_text")?.text
+  if (!text) throw new Error("No structured output in model response")
+  return { text, usage: body.usage ?? {} }
+}
+
 export async function runVerification(submissionId: string): Promise<void> {
   const admin = createAdminClient()
 
@@ -200,15 +314,16 @@ export async function runVerification(submissionId: string): Promise<void> {
   }
 
   const proofCode = req?.require_proof_code ? submission.proof_code : null
-  const stored = await getDecryptedOpenAiKey(gate.creator_id)
+  const stored = await getDecryptedAiKey(gate.creator_id)
 
   let outcome: VerificationOutcome | null = null
   let usage: { input_tokens?: number; output_tokens?: number } = {}
   let error: string | null = null
   const model = stored?.model ?? "unknown"
+  const provider: AiProvider = stored?.provider ?? "openai"
 
   if (!stored) {
-    error = "Creator has no OpenAI key configured."
+    error = "Creator has no verification (AI) key configured."
   } else if (items.some((it) => !it.storagePath)) {
     error = "Some required screenshots are missing."
   } else {
@@ -227,47 +342,14 @@ export async function runVerification(submissionId: string): Promise<void> {
         )
       }
 
-      const response = await fetch("https://api.openai.com/v1/responses", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${stored.key}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: stored.model,
-          input: [
-            {
-              role: "user",
-              content: [
-                { type: "input_text", text: buildPrompt(items, { proofCode }) },
-                ...images.map((url) => ({ type: "input_image", image_url: url })),
-              ],
-            },
-          ],
-          text: {
-            format: {
-              type: "json_schema",
-              name: "gate_verification",
-              strict: true,
-              schema: OUTCOME_SCHEMA,
-            },
-          },
-          max_output_tokens: 3000,
-        }),
-        signal: AbortSignal.timeout(90_000),
+      const { text, usage: tokenUsage } = await requestVerification({
+        provider: stored.provider,
+        key: stored.key,
+        model: stored.model,
+        prompt: buildPrompt(items, { proofCode }),
+        images,
       })
-
-      const body = await response.json()
-      if (!response.ok) {
-        throw new Error(
-          body?.error?.message ?? `OpenAI returned HTTP ${response.status}`
-        )
-      }
-      usage = body.usage ?? {}
-      const text: string | undefined = body.output
-        ?.find((o: { type: string }) => o.type === "message")
-        ?.content?.find((c: { type: string }) => c.type === "output_text")?.text
-      if (!text) throw new Error("No structured output in model response")
+      usage = tokenUsage
 
       const parsed = JSON.parse(text) as Omit<VerificationOutcome, "results"> & {
         results: { confirmed: boolean; note: string }[]
@@ -295,7 +377,7 @@ export async function runVerification(submissionId: string): Promise<void> {
 
   await admin.from("verification_runs").insert({
     submission_id: submissionId,
-    provider: "openai",
+    provider,
     model,
     criteria: { items: items.map((it) => it.label), proofCode },
     result: outcome,

@@ -6,7 +6,7 @@ import { ResendKeySection } from "@/app/dashboard/settings/resend-key-section"
 import { StorageSection } from "@/app/dashboard/settings/storage-section"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
-import { getAiKeyInfo, VERIFICATION_MODELS } from "@/lib/ai-keys"
+import { getAiKeyInfo } from "@/lib/ai-keys"
 import { getEmailKeyInfo } from "@/lib/email-keys"
 import { FREE_GATE_LIMIT } from "@/lib/limits"
 import { getR2Info } from "@/lib/storage"
@@ -69,11 +69,11 @@ export default async function OnboardingKeysPage() {
       <div className="mt-8 space-y-8">
         <div className="space-y-3">
           <HowTo
-            title="OpenAI key — verifies fan screenshots with AI"
-            steps="New to OpenAI? Use the step-by-step setup guide linked in the section below — it walks through getting your key (about $5, lasts a long time)."
+            title="AI key (OpenAI or OpenRouter) — verifies fan screenshots"
+            steps="New to OpenAI? Use the step-by-step setup guide linked in the section below (about $5, lasts a long time). Prefer a different model? Paste an OpenRouter key (sk-or-…) instead to use Gemini, Claude, GPT, and more."
             caveat="you can't publish gates that need follow/like/repost verification. Email-only gates still work."
           />
-          <OpenAiKeySection keyInfo={keyInfo} models={VERIFICATION_MODELS} />
+          <OpenAiKeySection keyInfo={keyInfo} />
         </div>
 
         <Separator />

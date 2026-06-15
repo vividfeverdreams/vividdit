@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache"
 
-import { hasValidOpenAiKey } from "@/lib/ai-keys"
+import { hasValidAiKey } from "@/lib/ai-keys"
 import { createClient } from "@/lib/supabase/server"
 
 export async function setGateArchived(formData: FormData) {
@@ -54,7 +54,7 @@ export async function publishGate(formData: FormData) {
   if (!asset) return
   const aiGate =
     req?.soundcloud_enabled || req?.instagram_enabled || req?.spotify_enabled
-  if (aiGate && !(await hasValidOpenAiKey(user.id))) return
+  if (aiGate && !(await hasValidAiKey(user.id))) return
 
   await supabase
     .from("gates")

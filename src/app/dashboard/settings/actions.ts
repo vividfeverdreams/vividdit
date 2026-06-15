@@ -4,12 +4,10 @@ import { revalidatePath } from "next/cache"
 import { z } from "zod"
 
 import {
-  removeOpenAiKey,
-  saveOpenAiKey,
+  removeAiKey,
+  saveAiKey,
   setVerificationModel,
-  testOpenAiKey,
-  VERIFICATION_MODELS,
-  type VerificationModel,
+  testAiKey,
 } from "@/lib/ai-keys"
 import {
   removeResendKey,
@@ -24,12 +22,12 @@ export type SettingsFormState = {
   success: string | null
 }
 
-const openAiKeySchema = z
+const aiKeySchema = z
   .string()
   .trim()
-  .min(20, "That doesn't look like an OpenAI API key")
-  .max(300, "That doesn't look like an OpenAI API key")
-  .startsWith("sk-", "OpenAI API keys start with sk-")
+  .min(20, "That doesn't look like an API key")
+  .max(300, "That doesn't look like an API key")
+  .startsWith("sk-", "Use an OpenAI key (sk-…) or an OpenRouter key (sk-or-…)")
 
 async function requireUser() {
   const supabase = await createClient()
@@ -46,12 +44,12 @@ export async function saveKeyAction(
   const user = await requireUser()
   if (!user) return { error: "Not signed in.", success: null }
 
-  const parsed = openAiKeySchema.safeParse(formData.get("apiKey"))
+  const parsed = aiKeySchema.safeParse(formData.get("apiKey"))
   if (!parsed.success) {
     return { error: parsed.error.issues[0].message, success: null }
   }
 
-  await saveOpenAiKey(user.id, parsed.data)
+  await saveAiKey(user.id, parsed.data)
   revalidatePath("/dashboard/settings")
   return { error: null, success: "Key saved. Run a test to validate it." }
 }
@@ -63,7 +61,7 @@ export async function testKeyAction(
   const user = await requireUser()
   if (!user) return { error: "Not signed in.", success: null }
 
-  const info = await testOpenAiKey(user.id)
+  const info = await testAiKey(user.id)
   revalidatePath("/dashboard/settings")
   if (!info) return { error: "No key saved yet.", success: null }
   if (info.keyStatus === "valid") {
@@ -79,7 +77,7 @@ export async function removeKeyAction(
   const user = await requireUser()
   if (!user) return { error: "Not signed in.", success: null }
 
-  await removeOpenAiKey(user.id)
+  await removeAiKey(user.id)
   revalidatePath("/dashboard/settings")
   return { error: null, success: "Key removed." }
 }
@@ -92,18 +90,22 @@ export async function setModelAction(
   if (!user) return { error: "Not signed in.", success: null }
 
   const model = formData.get("model")
-  if (
-    typeof model !== "string" ||
-    !VERIFICATION_MODELS.includes(model as VerificationModel)
-  ) {
-    return { error: "Unknown model.", success: null }
+  if (typeof model !== "string" || !model.trim()) {
+    return { error: "Enter a model.", success: null }
   }
 
-  await setVerificationModel(user.id, model as VerificationModel)
+  try {
+    await setVerificationModel(user.id, model.trim())
+  } catch (err) {
+    return {
+      error: err instanceof Error ? err.message : "Couldn't set the model.",
+      success: null,
+    }
+  }
   revalidatePath("/dashboard/settings")
   return {
     error: null,
-    success: `Verification model set to ${model}. Re-test your key to confirm access.`,
+    success: `Verification model set to ${model.trim()}. Re-test your key to confirm access.`,
   }
 }
 

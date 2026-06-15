@@ -5,7 +5,7 @@ import { ProfileSection } from "@/app/dashboard/settings/profile-section"
 import { ResendKeySection } from "@/app/dashboard/settings/resend-key-section"
 import { StorageSection } from "@/app/dashboard/settings/storage-section"
 import { Separator } from "@/components/ui/separator"
-import { getAiKeyInfo, VERIFICATION_MODELS } from "@/lib/ai-keys"
+import { getAiKeyInfo } from "@/lib/ai-keys"
 import { getEmailKeyInfo } from "@/lib/email-keys"
 import { FREE_GATE_LIMIT } from "@/lib/limits"
 import { getR2Info } from "@/lib/storage"
@@ -48,7 +48,7 @@ export default async function SettingsPage() {
         }}
       />
       <Separator />
-      <OpenAiKeySection keyInfo={keyInfo} models={VERIFICATION_MODELS} />
+      <OpenAiKeySection keyInfo={keyInfo} />
       <Separator />
       <StorageSection info={r2Info} freeGateLimit={FREE_GATE_LIMIT} />
       <Separator />

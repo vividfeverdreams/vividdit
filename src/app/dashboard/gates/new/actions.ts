@@ -3,7 +3,7 @@
 import { randomUUID } from "node:crypto"
 import { z } from "zod"
 
-import { hasValidOpenAiKey } from "@/lib/ai-keys"
+import { hasValidAiKey } from "@/lib/ai-keys"
 import { FREE_GATE_LIMIT } from "@/lib/limits"
 import { extractPalette, type Palette } from "@/lib/palette"
 import { isHttpUrl, profileLabel } from "@/lib/profiles"
@@ -188,7 +188,7 @@ export async function createGateAction(
     if (!d.asset) {
       return { ok: false, error: "Upload the HQ file before publishing." }
     }
-    if (aiGate && !(await hasValidOpenAiKey(user.id))) {
+    if (aiGate && !(await hasValidAiKey(user.id))) {
       return {
         ok: false,
         error:
