@@ -7,10 +7,10 @@ import { useEffect, useState, useTransition } from "react"
 import {
   checkSlugAction,
   createGateAction,
-  extractPaletteAction,
   getHqUploadTargetAction,
   resolveTrackAction,
 } from "@/app/dashboard/gates/new/actions"
+import { extractPaletteFromImage } from "@/lib/palette-client"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -24,7 +24,7 @@ import {
   uploadToPresignedUrl,
   type HqUploadResult,
 } from "@/lib/uploads"
-import { muted, readableForeground } from "@/lib/colors"
+import { muted, readableAccent, readableForeground } from "@/lib/colors"
 import { slugify, slugRegex } from "@/lib/validation"
 
 type Asset = HqUploadResult & { storageProvider: "supabase" | "r2" }
@@ -151,16 +151,12 @@ export function GateWizard({
         setSlug(slugify(result.title))
       }
       // Auto-suggest theme colors from the cover art — best-effort, must
-      // never block track resolution.
+      // never block track resolution. Runs in the browser via canvas.
       if (result.artworkUrl) {
-        try {
-          const palette = await extractPaletteAction(result.artworkUrl)
-          if (palette) {
-            setAccentColor(palette.accent)
-            setBackgroundColor(palette.background)
-          }
-        } catch {
-          // ignore — artist can pick colors manually
+        const palette = await extractPaletteFromImage(result.artworkUrl)
+        if (palette) {
+          setAccentColor(palette.accent)
+          setBackgroundColor(palette.background)
         }
       }
     })
@@ -173,13 +169,11 @@ export function GateWizard({
     if (!url) return
     setPullingColors(true)
     try {
-      const palette = await extractPaletteAction(url)
+      const palette = await extractPaletteFromImage(url)
       if (palette) {
         setAccentColor(palette.accent)
         setBackgroundColor(palette.background)
       }
-    } catch {
-      // ignore — colors are optional
     } finally {
       setPullingColors(false)
     }
@@ -859,6 +853,7 @@ function GatePreview({
   artist: string
 }) {
   const fg = readableForeground(background)
+  const labelColor = readableAccent(accent, background)
   return (
     <div
       className="mx-auto w-full max-w-xs overflow-hidden rounded-xl border shadow-sm"
@@ -880,7 +875,7 @@ function GatePreview({
         <div className="min-w-0">
           <p
             className="text-[10px] font-medium tracking-widest uppercase"
-            style={{ color: accent }}
+            style={{ color: labelColor }}
           >
             Free download
           </p>

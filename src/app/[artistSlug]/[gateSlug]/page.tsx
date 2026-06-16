@@ -4,7 +4,7 @@ import { notFound } from "next/navigation"
 
 import { TrackingPixels } from "@/app/[artistSlug]/[gateSlug]/tracking-pixels"
 import { UnlockPanel } from "@/app/[artistSlug]/[gateSlug]/unlock-panel"
-import { muted, readableForeground } from "@/lib/colors"
+import { muted, readableAccent, readableForeground } from "@/lib/colors"
 import { soundcloudPlayerSrc } from "@/lib/soundcloud"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { createClient } from "@/lib/supabase/server"
@@ -113,6 +113,8 @@ export default async function GatePage({
   const accent = theme.accentColor ?? "#18181b"
   const background = theme.backgroundColor ?? "#0a0a0a"
   const fg = readableForeground(background)
+  // Guarantee the accent-colored label stays legible on the background.
+  const labelColor = readableAccent(accent, background)
   const cover = coverUrl(gate)
   const tracking = {
     facebookPixelId: null,
@@ -142,7 +144,7 @@ export default async function GatePage({
         <div className="text-center">
           <p
             className="text-xs font-medium tracking-widest uppercase"
-            style={{ color: accent }}
+            style={{ color: labelColor }}
           >
             Free download
           </p>

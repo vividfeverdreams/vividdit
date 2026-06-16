@@ -5,7 +5,6 @@ import { z } from "zod"
 
 import { hasValidAiKey } from "@/lib/ai-keys"
 import { FREE_GATE_LIMIT } from "@/lib/limits"
-import { extractPalette, type Palette } from "@/lib/palette"
 import { isHttpUrl, profileLabel } from "@/lib/profiles"
 import { resolveSoundcloudTrack, type SoundcloudTrack } from "@/lib/soundcloud"
 import { hasValidR2, presignR2Upload } from "@/lib/storage"
@@ -47,18 +46,6 @@ export async function resolveTrackAction(
   if (!user) return { error: "Not signed in." }
 
   return resolveSoundcloudTrack(url)
-}
-
-export async function extractPaletteAction(
-  imageUrl: string
-): Promise<Palette | null> {
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) return null
-  if (!isHttpUrl(imageUrl)) return null
-  return extractPalette(imageUrl)
 }
 
 export async function checkSlugAction(
