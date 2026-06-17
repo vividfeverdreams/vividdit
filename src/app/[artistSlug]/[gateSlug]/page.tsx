@@ -187,10 +187,18 @@ export default async function GatePage({
         />
 
         <footer
-          className="mt-auto pt-8 text-center text-xs"
+          className="mt-auto flex flex-col items-center gap-1 pt-8 text-center text-xs"
           style={{ color: muted(fg, 0.5) }}
         >
-          Powered by Vividdit
+          <span>Powered by Vividdit</span>
+          <span className="flex gap-3">
+            <a href="/privacy" className="underline-offset-2 hover:underline">
+              Privacy
+            </a>
+            <a href="/terms" className="underline-offset-2 hover:underline">
+              Terms
+            </a>
+          </span>
         </footer>
       </div>
 

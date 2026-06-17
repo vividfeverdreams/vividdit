@@ -62,10 +62,24 @@ export async function GET(request: NextRequest) {
     .eq("status", "verifying")
     .lt("updated_at", stuckCutoff)
 
+  // 4. Data minimization: drop transactional fan emails we no longer need.
+  // An email is only retained long-term when the fan opted into the creator's
+  // list (email_consent = true). Emails captured solely to deliver a one-time
+  // download are nulled once the submission is terminal and past retention —
+  // the row stays (for analytics counts) but the PII is shed.
+  const { count: emailsMinimized } = await admin
+    .from("submissions")
+    .update({ email: null }, { count: "exact" })
+    .in("status", ["approved", "rejected"])
+    .eq("email_consent", false)
+    .not("email", "is", null)
+    .lt("created_at", cutoff)
+
   return NextResponse.json({
     ok: true,
     proofsDeleted,
     tokensDeleted: tokensDeleted ?? 0,
     unstuckSubmissions: unstuck ?? 0,
+    emailsMinimized: emailsMinimized ?? 0,
   })
 }

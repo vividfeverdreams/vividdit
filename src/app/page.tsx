@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 
 export default function Home() {
   return (
+    <>
     <main className="flex flex-1 flex-col items-center justify-center gap-8 px-6 py-24 text-center">
       <div className="space-y-4 max-w-2xl">
         <p className="text-sm font-medium tracking-widest uppercase text-muted-foreground">
@@ -35,5 +36,14 @@ export default function Home() {
         </Button>
       </div>
     </main>
+    <footer className="flex items-center justify-center gap-4 px-6 py-8 text-xs text-muted-foreground">
+      <Link href="/privacy" className="hover:text-foreground">
+        Privacy
+      </Link>
+      <Link href="/terms" className="hover:text-foreground">
+        Terms
+      </Link>
+    </footer>
+    </>
   );
 }
