@@ -4,7 +4,8 @@ import { decryptSecret, encryptSecret } from "@/lib/crypto"
 
 describe("BYOK key encryption", () => {
   it("round-trips a key", () => {
-    const key = "sk-proj-abc123XYZ_secret-key-material"
+    // Obviously-fake fixture (not a real key) so secret scanners don't flag it.
+    const key = "DUMMY-test-value-not-a-real-key"
     const encrypted = encryptSecret(key)
     expect(encrypted).not.toContain(key)
     expect(encrypted.startsWith("v1:")).toBe(true)

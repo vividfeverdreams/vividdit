@@ -171,6 +171,17 @@ export async function createGateAction(
     return { ok: false, error: "Every follow profile needs a valid URL." }
   }
 
+  // Defense-in-depth: the HQ storage path is built client-side and is later
+  // signed with the service-role admin client (which bypasses Storage RLS).
+  // Ensure a creator can only ever register a path inside their OWN namespace —
+  // no path traversal, no other tenant's files.
+  if (d.asset) {
+    const p = d.asset.storagePath
+    if (!p.startsWith(`${user.id}/`) || p.includes("..") || p.includes("\\")) {
+      return { ok: false, error: "Invalid upload path." }
+    }
+  }
+
   if (d.publish) {
     if (!d.asset) {
       return { ok: false, error: "Upload the HQ file before publishing." }

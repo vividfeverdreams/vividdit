@@ -14,6 +14,16 @@ export type HqUploadResult = {
 const HQ_MIME_FALLBACK = "application/octet-stream"
 
 /**
+ * Strips path components and unsafe characters from a user-supplied filename so
+ * it can't introduce path traversal ("../") into a storage key. The authoritative
+ * check also runs server-side at gate creation.
+ */
+function safeName(name: string): string {
+  const base = name.split(/[/\\]/).pop() ?? "file"
+  return base.replace(/[^a-zA-Z0-9._-]/g, "_").replace(/^\.+/, "") || "file"
+}
+
+/**
  * Resumable upload to the private hq-files bucket via Supabase's TUS
  * endpoint. WAV/AIFF files routinely exceed 100MB, where a single POST
  * would be flaky. Chunk size must be exactly 6MB per Supabase docs.
@@ -28,7 +38,7 @@ export async function uploadHqFile(
   } = await supabase.auth.getSession()
   if (!session) throw new Error("Not signed in")
 
-  const objectName = `${session.user.id}/${crypto.randomUUID()}/${file.name}`
+  const objectName = `${session.user.id}/${crypto.randomUUID()}/${safeName(file.name)}`
 
   await new Promise<void>((resolve, reject) => {
     const upload = new tus.Upload(file, {
@@ -99,7 +109,7 @@ export async function uploadCoverImage(file: File): Promise<string> {
   } = await supabase.auth.getSession()
   if (!session) throw new Error("Not signed in")
 
-  const path = `${session.user.id}/${crypto.randomUUID()}-${file.name}`
+  const path = `${session.user.id}/${crypto.randomUUID()}-${safeName(file.name)}`
   const { error } = await supabase.storage.from("covers").upload(path, file, {
     cacheControl: "3600",
     upsert: false,
