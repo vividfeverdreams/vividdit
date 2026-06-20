@@ -53,6 +53,19 @@ export default async function SettingsPage() {
       <StorageSection info={r2Info} freeGateLimit={FREE_GATE_LIMIT} />
       <Separator />
       <ResendKeySection keyInfo={emailKeyInfo} />
+      <Separator />
+      <p className="text-sm text-muted-foreground">
+        Vividdit is open source (AGPL-3.0). Want to audit the code or run your
+        own copy?{" "}
+        <a
+          href="https://github.com/vividfeverdreams/vividdit"
+          target="_blank"
+          rel="noreferrer"
+          className="font-medium text-foreground underline"
+        >
+          View it on GitHub →
+        </a>
+      </p>
     </div>
   )
 }
