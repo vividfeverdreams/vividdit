@@ -145,16 +145,18 @@ export default async function GatePage({
 
   return (
     <main
-      className="flex min-h-svh flex-col items-center px-4 py-4"
+      className="flex min-h-svh flex-col items-center px-4 py-4 md:justify-center md:py-8"
       style={{ backgroundColor: background, color: fg }}
     >
-      <div className="flex w-full max-w-md flex-1 flex-col gap-2.5">
+      <div className="flex w-full max-w-md flex-col gap-3 md:max-w-3xl md:flex-row md:items-center md:gap-8">
+        {/* Media — cover, title, player */}
+        <div className="flex flex-col gap-2.5 md:w-[320px] md:shrink-0">
         {cover && (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={cover}
             alt={`${gate.title} cover art`}
-            className="mx-auto aspect-square w-28 rounded-xl object-cover shadow-lg"
+            className="mx-auto aspect-square w-28 rounded-xl object-cover shadow-lg md:w-full"
           />
         )}
         <div className="text-center">
@@ -179,7 +181,10 @@ export default async function GatePage({
           allow="autoplay"
           src={soundcloudPlayerSrc(gate.soundcloud_url)}
         />
+        </div>
 
+        {/* Checklist — sits beside the media on desktop */}
+        <div className="flex flex-col gap-3 md:min-w-0 md:flex-1">
         <UnlockPanel
         gateId={gate.id}
         accent={accent}
@@ -223,22 +228,23 @@ export default async function GatePage({
             </p>
           </div>
         </details>
-
-        <footer
-          className="mt-auto flex flex-col items-center gap-1 pt-8 text-center text-xs"
-          style={{ color: muted(fg, 0.5) }}
-        >
-          <span>Powered by Vividdit</span>
-          <span className="flex gap-3">
-            <a href="/privacy" className="underline-offset-2 hover:underline">
-              Privacy
-            </a>
-            <a href="/terms" className="underline-offset-2 hover:underline">
-              Terms
-            </a>
-          </span>
-        </footer>
+        </div>
       </div>
+
+      <footer
+        className="mt-6 flex flex-col items-center gap-1 text-center text-xs"
+        style={{ color: muted(fg, 0.5) }}
+      >
+        <span>Powered by Vividdit</span>
+        <span className="flex gap-3">
+          <a href="/privacy" className="underline-offset-2 hover:underline">
+            Privacy
+          </a>
+          <a href="/terms" className="underline-offset-2 hover:underline">
+            Terms
+          </a>
+        </span>
+      </footer>
 
       <TrackingPixels tracking={tracking} accent={accent} />
     </main>
