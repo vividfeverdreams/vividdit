@@ -779,7 +779,7 @@ export function GateWizard({
   )
 }
 
-function FollowList({
+export function FollowList({
   label,
   urls,
   onChange,
@@ -839,7 +839,7 @@ function FollowList({
   )
 }
 
-function GatePreview({
+export function GatePreview({
   accent,
   background,
   coverUrl,

@@ -171,6 +171,16 @@ export default async function GatesPage({
 
                     <div className="flex gap-2">
                       {g.status === "published" && <CopyUrlButton url={publicUrl} />}
+                      {g.status !== "archived" && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          render={<Link href={`/dashboard/gates/${g.id}/edit`} />}
+                          nativeButton={false}
+                        >
+                          Edit
+                        </Button>
+                      )}
                       {g.status === "draft" && (
                         <form action={publishGate}>
                           <input type="hidden" name="gateId" value={g.id} />
