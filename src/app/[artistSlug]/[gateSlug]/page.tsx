@@ -62,6 +62,22 @@ export async function generateMetadata({
   }
 }
 
+// A short, one-line label for a follow target when the creator didn't set a
+// display name. Instagram/SoundCloud handles are the first path segment; other
+// URLs are just stripped of their scheme/www.
+function followHandle(platform: string, url: string): string {
+  try {
+    const u = new URL(url)
+    const seg = u.pathname.split("/").filter(Boolean)
+    if ((platform === "instagram" || platform === "soundcloud") && seg[0]) {
+      return `@${seg[0]}`
+    }
+    return (u.host.replace(/^www\./, "") + u.pathname).replace(/\/$/, "")
+  } catch {
+    return url
+  }
+}
+
 function coverUrl(gate: {
   cover_path: string | null
   theme: { artworkUrl?: string | null } | null
@@ -129,27 +145,29 @@ export default async function GatePage({
 
   return (
     <main
-      className="flex min-h-svh flex-col items-center px-4 py-10"
+      className="flex min-h-svh flex-col items-center px-4 py-4"
       style={{ backgroundColor: background, color: fg }}
     >
-      <div className="flex w-full max-w-md flex-1 flex-col gap-6">
+      <div className="flex w-full max-w-md flex-1 flex-col gap-2.5">
         {cover && (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={cover}
             alt={`${gate.title} cover art`}
-            className="aspect-square w-full rounded-2xl object-cover shadow-2xl"
+            className="mx-auto aspect-square w-28 rounded-xl object-cover shadow-lg"
           />
         )}
         <div className="text-center">
           <p
-            className="text-xs font-medium tracking-widest uppercase"
+            className="text-[11px] font-medium tracking-widest uppercase"
             style={{ color: labelColor }}
           >
             Free download
           </p>
-          <h1 className="text-2xl font-bold">{gate.title}</h1>
-          <p style={{ color: muted(fg, 0.7) }}>{gate.artist}</p>
+          <h1 className="text-xl font-bold leading-tight">{gate.title}</h1>
+          <p className="text-sm" style={{ color: muted(fg, 0.7) }}>
+            {gate.artist}
+          </p>
         </div>
 
         <iframe
@@ -174,7 +192,7 @@ export default async function GatePage({
             id: t.id,
             platform: t.platform as "soundcloud" | "instagram" | "spotify",
             profileUrl: t.profile_url,
-            displayName: t.display_name ?? t.profile_url,
+            displayName: t.display_name ?? followHandle(t.platform, t.profile_url),
           })),
         }}
         track={{

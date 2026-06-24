@@ -11,7 +11,6 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { fireDownloadConversion, type GateTracking } from "@/lib/tracking"
 import { cn } from "@/lib/utils"
 
@@ -53,9 +52,7 @@ type Submission = {
   proofCode: string
 }
 
-type ProofStep =
-  | { kind: "track" }
-  | { kind: "follow"; target: FollowTarget }
+type ProofStep = { kind: "track" } | { kind: "follow"; target: FollowTarget }
 
 function fileError(file: File): string | null {
   if (!ALLOWED_TYPES.includes(file.type))
@@ -123,7 +120,6 @@ export function UnlockPanel({
   const removeFile = (i: number) =>
     setBatchFiles((prev) => prev.filter((_, j) => j !== i))
 
-  // Drop a screenshot anywhere on the page → adds it to the upload box.
   useEffect(() => {
     if (outcome || !hasProofs) return
     const hasFile = (e: DragEvent) =>
@@ -202,8 +198,6 @@ export function UnlockPanel({
       window.innerWidth > 900 ? "width=1100,height=850,noopener" : "noopener"
     )
 
-  // Proof-code gates: the code lives on the submission, so create it (which
-  // needs email when required) the moment the fan opens the SoundCloud track.
   const handleTrackOpen = async () => {
     if (requirements.requireProofCode && !submission) {
       setBusy(true)
@@ -233,7 +227,7 @@ export function UnlockPanel({
     try {
       const sub = await ensureSubmission()
       if (!sub) return
-      if (!hasProofs) return // email-only → approved via ensureSubmission
+      if (!hasProofs) return
 
       const form = new FormData()
       form.set("statusToken", sub.statusToken)
@@ -261,8 +255,8 @@ export function UnlockPanel({
   if (outcome === "verifying") {
     return (
       <Card>
-        <CardContent className="space-y-2 pt-6 text-center">
-          <h2 className="text-lg font-semibold">Checking your proof…</h2>
+        <CardContent className="space-y-1 py-5 text-center">
+          <h2 className="font-semibold">Checking your proof…</h2>
           <p className="text-sm text-muted-foreground">
             Usually under a minute — hang tight.
           </p>
@@ -273,8 +267,8 @@ export function UnlockPanel({
   if (outcome === "approved" && submission) {
     return (
       <Card>
-        <CardContent className="space-y-3 pt-6 text-center">
-          <h2 className="text-lg font-semibold">You&apos;re in! 🎉</h2>
+        <CardContent className="space-y-2 py-5 text-center">
+          <h2 className="font-semibold">You&apos;re in! 🎉</h2>
           <Button
             render={<a href={`/download/by-status/${submission.statusToken}`} />}
             nativeButton={false}
@@ -290,14 +284,14 @@ export function UnlockPanel({
   if ((outcome === "rejected" || outcome === "needs_review") && submission) {
     return (
       <Card>
-        <CardContent className="space-y-3 pt-6 text-center">
-          <h2 className="text-lg font-semibold">
+        <CardContent className="space-y-2 py-5 text-center">
+          <h2 className="font-semibold">
             {outcome === "rejected" ? "Couldn't verify yet" : "Almost there"}
           </h2>
           <p className="text-sm text-muted-foreground">
             {outcome === "rejected"
-              ? "We couldn't confirm your proof. Open your status page to see why and resubmit."
-              : "We're giving your proof a closer look. Check your status page for the outcome."}
+              ? "We couldn't confirm your proof. Open your status page to resubmit."
+              : "We're taking a closer look. Check your status page for the outcome."}
           </p>
           <Button
             render={<a href={`/s/${submission.statusToken}`} />}
@@ -312,193 +306,180 @@ export function UnlockPanel({
     )
   }
 
-  // ---- checklist ----
+  // ---- compact single-box checklist ----
   let n = 0
+  const OpenBtn = ({ onClick }: { onClick: () => void }) => (
+    <Button
+      size="sm"
+      onClick={onClick}
+      disabled={busy}
+      className="h-7 shrink-0 px-2 text-xs"
+      style={{ backgroundColor: accent }}
+    >
+      Open ↗
+    </Button>
+  )
+
   return (
     <Card className={cn(dragging && "ring-2 ring-offset-2", "transition")}>
-      <CardContent className="space-y-4 pt-6">
-        <div>
-          <h2 className="text-lg font-semibold">Unlock the download</h2>
-          <p className="text-sm text-muted-foreground">
-            {hasProofs
-              ? "Do each step, then upload your screenshots below."
-              : "One quick step to unlock."}
-          </p>
+      <CardContent className="p-0">
+        <div className="px-4 pt-3 pb-2">
+          <h2 className="text-base font-semibold">Unlock the download</h2>
         </div>
 
         {error && (
-          <Alert variant="destructive">
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
+          <div className="px-4 pb-2">
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          </div>
         )}
 
-        {requirements.emailEnabled && (
-          <ChecklistRow
-            n={++n}
-            title={`Join ${track.artistName}'s email list`}
-            done={!!email.trim() && consent}
-            accent={accent}
-          >
-            <div className="space-y-2">
-              <Label htmlFor="fanEmail">Your email</Label>
+        <div className="divide-y border-y">
+          {requirements.emailEnabled && (
+            <Row n={++n} done={!!email.trim() && consent} accent={accent}>
+              <p className="text-sm font-medium">
+                Join {track.artistName}&apos;s email list
+              </p>
               <Input
-                id="fanEmail"
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@example.com"
+                className="mt-1.5 h-9"
+              />
+              <label className="mt-1.5 flex items-start gap-1.5 text-[11px] leading-tight text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={consent}
+                  onChange={(e) => setConsent(e.target.checked)}
+                  className="mt-0.5 size-3.5"
+                />
+                Join {track.artistName}&apos;s list &amp; get updates.
+                Unsubscribe anytime.
+              </label>
+            </Row>
+          )}
+
+          {proofSteps.map((s) => {
+            if (s.kind === "track") {
+              return (
+                <Row key="track" n={++n} accent={accent}>
+                  <div className="flex items-center gap-2">
+                    <p className="flex-1 text-sm font-medium">
+                      Like / Repost on SoundCloud
+                    </p>
+                    <OpenBtn onClick={handleTrackOpen} />
+                  </div>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {[
+                      requirements.requireLike && "♥ Like",
+                      requirements.requireRepost && "⟳ Repost",
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}{" "}
+                    the track, then screenshot it.
+                  </p>
+                  {requirements.requireProofCode &&
+                    (submission ? (
+                      <div className="mt-1.5 flex items-center gap-2 rounded-md border px-2 py-1">
+                        <code className="text-sm font-semibold tracking-wider">
+                          {submission.proofCode}
+                        </code>
+                        <span className="text-[11px] text-muted-foreground">
+                          paste in a comment
+                        </span>
+                        <button
+                          type="button"
+                          className="ml-auto text-xs underline"
+                          onClick={() =>
+                            navigator.clipboard.writeText(submission.proofCode)
+                          }
+                        >
+                          Copy
+                        </button>
+                      </div>
+                    ) : (
+                      <p className="mt-0.5 text-[11px] text-muted-foreground">
+                        Tap “Open ↗” to get your proof code.
+                      </p>
+                    ))}
+                </Row>
+              )
+            }
+            return (
+              <Row key={s.target.id} n={++n} accent={accent}>
+                <div className="flex items-center gap-2">
+                  <p className="flex-1 text-sm font-medium">
+                    Follow {s.target.displayName} on{" "}
+                    {PLATFORM_LABEL[s.target.platform]}
+                  </p>
+                  <OpenBtn onClick={() => openProfile(s.target.profileUrl)} />
+                </div>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Tap <strong>Follow</strong>, then screenshot “Following”.
+                </p>
+              </Row>
+            )
+          })}
+
+          {hasProofs && (
+            <div className="px-4 py-2.5">
+              <p className="text-sm font-medium">
+                Upload your screenshots{" "}
+                <span className="font-normal text-muted-foreground">
+                  ({proofSteps.length})
+                </span>
+              </p>
+              <BatchDrop
+                files={batchFiles}
+                dragging={dragging}
+                onAdd={addFiles}
+                onRemove={removeFile}
               />
             </div>
-            <label className="flex items-start gap-2 text-xs text-muted-foreground">
-              <input
-                type="checkbox"
-                checked={consent}
-                onChange={(e) => setConsent(e.target.checked)}
-                className="mt-0.5 size-4"
-              />
-              I agree to join {track.artistName}&apos;s email list and receive
-              updates. Unsubscribe anytime.
-            </label>
-          </ChecklistRow>
-        )}
+          )}
+        </div>
 
-        {proofSteps.map((s) => {
-          if (s.kind === "track") {
-            return (
-              <ChecklistRow
-                key="track"
-                n={++n}
-                title="Like / Repost on SoundCloud"
-                accent={accent}
-                action={
-                  <Button
-                    size="sm"
-                    onClick={handleTrackOpen}
-                    disabled={busy}
-                    style={{ backgroundColor: accent }}
-                  >
-                    Open ↗
-                  </Button>
-                }
-              >
-                <ul className="space-y-1 text-sm text-muted-foreground">
-                  {requirements.requireLike && <li>♥ Tap Like (the heart)</li>}
-                  {requirements.requireRepost && <li>⟳ Tap Repost</li>}
-                </ul>
-                {requirements.requireProofCode &&
-                  (submission ? (
-                    <div className="flex items-center gap-2 rounded-lg border p-2">
-                      <code className="text-base font-semibold tracking-wider">
-                        {submission.proofCode}
-                      </code>
-                      <span className="text-xs text-muted-foreground">
-                        paste in the comment box
-                      </span>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="ml-auto"
-                        onClick={() =>
-                          navigator.clipboard.writeText(submission.proofCode)
-                        }
-                      >
-                        Copy
-                      </Button>
-                    </div>
-                  ) : (
-                    <p className="text-xs text-muted-foreground">
-                      Tap “Open ↗” to get your unique proof code.
-                    </p>
-                  ))}
-              </ChecklistRow>
-            )
-          }
-          return (
-            <ChecklistRow
-              key={s.target.id}
-              n={++n}
-              title={`Follow ${s.target.displayName} on ${PLATFORM_LABEL[s.target.platform]}`}
-              accent={accent}
-              action={
-                <Button
-                  size="sm"
-                  onClick={() => openProfile(s.target.profileUrl)}
-                  style={{ backgroundColor: accent }}
-                >
-                  Open ↗
-                </Button>
-              }
-            >
-              <p className="text-sm text-muted-foreground">
-                Tap <strong>Follow</strong>, then screenshot the profile showing
-                “Following”.
-              </p>
-            </ChecklistRow>
-          )
-        })}
-
-        {hasProofs && (
-          <div className="space-y-2 rounded-lg border p-4">
-            <h3 className="font-medium">Upload your screenshots</h3>
-            <p className="text-xs text-muted-foreground">
-              Add one for each step above ({proofSteps.length}). Drop them
-              anywhere on the page or tap to choose — the AI matches each to its
-              step.
-            </p>
-            <BatchDrop
-              files={batchFiles}
-              dragging={dragging}
-              onAdd={addFiles}
-              onRemove={removeFile}
-            />
-          </div>
-        )}
-
-        <Button
-          onClick={handleUnlock}
-          disabled={busy}
-          className="w-full"
-          style={{ backgroundColor: accent }}
-        >
-          {busy
-            ? "Working…"
-            : hasProofs
-              ? "Unlock the download"
-              : "Get the download"}
-        </Button>
+        <div className="p-4">
+          <Button
+            onClick={handleUnlock}
+            disabled={busy}
+            className="w-full"
+            style={{ backgroundColor: accent }}
+          >
+            {busy
+              ? "Working…"
+              : hasProofs
+                ? "Unlock the download"
+                : "Get the download"}
+          </Button>
+        </div>
       </CardContent>
     </Card>
   )
 }
 
-function ChecklistRow({
+function Row({
   n,
-  title,
   done,
   accent,
-  action,
   children,
 }: {
   n: number
-  title: string
   done?: boolean
   accent: string
-  action?: React.ReactNode
-  children?: React.ReactNode
+  children: React.ReactNode
 }) {
   return (
-    <div className="space-y-2 rounded-lg border p-4">
-      <div className="flex items-center gap-3">
-        <span
-          className="flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-white"
-          style={{ backgroundColor: done ? accent : "#a1a1aa" }}
-        >
-          {done ? "✓" : n}
-        </span>
-        <h3 className="flex-1 font-medium">{title}</h3>
-        {action}
-      </div>
-      {children && <div className="space-y-2 pl-9">{children}</div>}
+    <div className="flex gap-3 px-4 py-2.5">
+      <span
+        className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-white"
+        style={{ backgroundColor: done ? accent : "#a1a1aa" }}
+      >
+        {done ? "✓" : n}
+      </span>
+      <div className="min-w-0 flex-1">{children}</div>
     </div>
   )
 }
@@ -516,7 +497,7 @@ function BatchDrop({
 }) {
   const [over, setOver] = useState(false)
   return (
-    <div className="space-y-2">
+    <div className="mt-1.5 space-y-1.5">
       <label
         onDragOver={(e) => {
           e.preventDefault()
@@ -534,13 +515,13 @@ function BatchDrop({
           onAdd(e.dataTransfer.files)
         }}
         className={cn(
-          "flex cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed p-5 text-center text-sm transition-colors",
+          "flex cursor-pointer items-center justify-center gap-1 rounded-md border-2 border-dashed px-3 py-2.5 text-center text-xs transition-colors",
           over || dragging
             ? "border-primary bg-muted"
             : "border-input hover:bg-muted/50"
         )}
       >
-        <span className="font-medium">Drop your screenshots here</span>
+        <span className="font-medium">Drop screenshots here</span>
         <span className="text-muted-foreground">or tap to choose</span>
         <input
           type="file"
@@ -551,11 +532,11 @@ function BatchDrop({
         />
       </label>
       {files.length > 0 && (
-        <ul className="space-y-1 text-sm">
+        <ul className="space-y-1 text-xs">
           {files.map((f, i) => (
             <li
               key={`${f.name}-${i}`}
-              className="flex items-center gap-2 rounded-md border px-2 py-1"
+              className="flex items-center gap-2 rounded border px-2 py-0.5"
             >
               <span className="truncate">✓ {f.name}</span>
               <button
