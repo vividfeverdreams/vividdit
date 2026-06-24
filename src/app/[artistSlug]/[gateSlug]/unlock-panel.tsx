@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 
 import {
   finalizeSubmissionAction,
@@ -12,8 +12,8 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Progress } from "@/components/ui/progress"
 import { fireDownloadConversion, type GateTracking } from "@/lib/tracking"
+import { cn } from "@/lib/utils"
 
 const MAX_BYTES = 10 * 1024 * 1024
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"]
@@ -52,10 +52,16 @@ type Submission = {
   proofCode: string
 }
 
-type Step =
-  | { kind: "email" }
-  | { kind: "track" }
-  | { kind: "follow"; target: FollowTarget }
+type ProofStep =
+  | { key: "track"; kind: "track" }
+  | { key: string; kind: "follow"; target: FollowTarget }
+
+function fileError(file: File): string | null {
+  if (!ALLOWED_TYPES.includes(file.type))
+    return "Screenshots must be JPG, PNG, or WEBP."
+  if (file.size > MAX_BYTES) return `${file.name} is over 10MB.`
+  return null
+}
 
 export function UnlockPanel({
   gateId,
@@ -70,36 +76,101 @@ export function UnlockPanel({
   track: Track
   tracking: GateTracking
 }) {
-  const steps = useMemo<Step[]>(() => {
-    const s: Step[] = []
-    if (requirements.emailEnabled) s.push({ kind: "email" })
+  const proofSteps = useMemo<ProofStep[]>(() => {
+    const s: ProofStep[] = []
     if (requirements.requireLike || requirements.requireRepost)
-      s.push({ kind: "track" })
+      s.push({ key: "track", kind: "track" })
     for (const target of requirements.followTargets)
-      s.push({ kind: "follow", target })
+      s.push({ key: `follow:${target.id}`, kind: "follow", target })
     return s
   }, [requirements])
 
-  const [stepIndex, setStepIndex] = useState(0)
-  const [submission, setSubmission] = useState<Submission | null>(null)
+  const hasProofs = proofSteps.length > 0
+
   const [email, setEmail] = useState("")
   const [consent, setConsent] = useState(false)
-  const [file, setFile] = useState<File | null>(null)
+  const [files, setFiles] = useState<Record<string, File | null>>({})
+  const [submission, setSubmission] = useState<Submission | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [dragging, setDragging] = useState(false)
   const [outcome, setOutcome] = useState<
     null | "verifying" | "approved" | "rejected" | "needs_review"
   >(null)
 
-  const done = stepIndex >= steps.length
-  const progress = outcome ? 100 : Math.round((stepIndex / steps.length) * 100)
+  // Mirror of files for the window-level drop handler (avoids stale closures).
+  const filesRef = useRef(files)
+  filesRef.current = files
 
   useEffect(() => {
     if (outcome === "approved") fireDownloadConversion(tracking)
   }, [outcome, tracking])
 
+  const setStepFile = (key: string, file: File | null) => {
+    if (file) {
+      const err = fileError(file)
+      if (err) return setError(err)
+    }
+    setError(null)
+    setFiles((prev) => ({ ...prev, [key]: file }))
+  }
+
+  // Drop anywhere on the page → attach to the first step still missing a shot.
+  const assignToNextEmpty = (file: File) => {
+    const err = fileError(file)
+    if (err) return setError(err)
+    const cur = filesRef.current
+    const target =
+      proofSteps.find((s) => !cur[s.key]) ?? proofSteps[proofSteps.length - 1]
+    if (!target) return
+    setError(null)
+    setFiles((prev) => ({ ...prev, [target.key]: file }))
+  }
+
+  useEffect(() => {
+    if (outcome || !hasProofs) return
+    const hasFile = (e: DragEvent) =>
+      Array.from(e.dataTransfer?.types ?? []).includes("Files")
+    const onOver = (e: DragEvent) => {
+      if (hasFile(e)) {
+        e.preventDefault()
+        setDragging(true)
+      }
+    }
+    const onDrop = (e: DragEvent) => {
+      if (!hasFile(e)) return
+      e.preventDefault()
+      setDragging(false)
+      const f = e.dataTransfer?.files?.[0]
+      if (f) assignToNextEmpty(f)
+    }
+    const onLeave = (e: DragEvent) => {
+      if (!e.relatedTarget) setDragging(false)
+    }
+    window.addEventListener("dragover", onOver)
+    window.addEventListener("drop", onDrop)
+    window.addEventListener("dragleave", onLeave)
+    return () => {
+      window.removeEventListener("dragover", onOver)
+      window.removeEventListener("drop", onDrop)
+      window.removeEventListener("dragleave", onLeave)
+    }
+    // assignToNextEmpty reads current files via filesRef
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [outcome, hasProofs, proofSteps])
+
   const ensureSubmission = async (): Promise<Submission | null> => {
     if (submission) return submission
+    if (requirements.emailEnabled) {
+      if (!email.trim()) {
+        setError("Enter your email to continue.")
+        return null
+      }
+      if (!consent) {
+        setError("Please accept to join the artist's list.")
+        return null
+      }
+    }
     const result = await startSubmissionAction({
       gateId,
       email: requirements.emailEnabled ? email.trim() : null,
@@ -120,7 +191,7 @@ export function UnlockPanel({
   }
 
   const pollStatus = async (statusToken: string) => {
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < 16; i++) {
       await new Promise((r) => setTimeout(r, 2500))
       const { status } = await getSubmissionStatusAction(statusToken)
       if (status === "approved") return setOutcome("approved")
@@ -130,102 +201,158 @@ export function UnlockPanel({
     setOutcome("needs_review")
   }
 
-  const uploadProof = async (
-    sub: Submission,
-    platform: string,
-    followTargetId: string | null,
-    isLast: boolean
-  ) => {
-    const form = new FormData()
-    form.set("statusToken", sub.statusToken)
-    form.set("platform", platform)
-    form.set("finalize", "false")
-    if (followTargetId) form.set("followTargetId", followTargetId)
-    form.append("proofs", file!)
-    const res = await fetch(`/api/submissions/${sub.submissionId}/proofs`, {
-      method: "POST",
-      body: form,
-    })
-    const body = await res.json()
-    if (!res.ok) {
-      setError(body.error ?? "Upload failed. Try again.")
-      return false
+  const openProfile = (url: string) =>
+    window.open(
+      url,
+      "vividdit-action",
+      window.innerWidth > 900 ? "width=1100,height=850,noopener" : "noopener"
+    )
+
+  // Proof-code gates: the code lives on the submission, so create it (which
+  // needs email when required) the moment the fan opens the SoundCloud track.
+  const handleTrackOpen = async () => {
+    if (requirements.requireProofCode && !submission) {
+      setBusy(true)
+      try {
+        const sub = await ensureSubmission()
+        if (!sub) return
+        openProfile(track.soundcloudUrl)
+      } finally {
+        setBusy(false)
+      }
+    } else {
+      openProfile(track.soundcloudUrl)
     }
-    if (isLast) {
+  }
+
+  const handleUnlock = async () => {
+    setError(null)
+    if (requirements.emailEnabled) {
+      if (!email.trim()) return setError("Enter your email.")
+      if (!consent) return setError("Please accept to join the artist's list.")
+    }
+    for (const s of proofSteps) {
+      if (!files[s.key]) {
+        const label =
+          s.kind === "track" ? "the SoundCloud track" : s.target.displayName
+        return setError(`Add a screenshot for: ${label}.`)
+      }
+    }
+
+    setBusy(true)
+    try {
+      const sub = await ensureSubmission()
+      if (!sub) return
+      if (!hasProofs) return // email-only → approved via ensureSubmission
+
+      for (const s of proofSteps) {
+        const file = files[s.key]!
+        const platform = s.kind === "track" ? "soundcloud" : s.target.platform
+        const followTargetId = s.kind === "track" ? null : s.target.id
+        const form = new FormData()
+        form.set("statusToken", sub.statusToken)
+        form.set("platform", platform)
+        form.set("finalize", "false")
+        if (followTargetId) form.set("followTargetId", followTargetId)
+        form.append("proofs", file)
+        const res = await fetch(
+          `/api/submissions/${sub.submissionId}/proofs`,
+          { method: "POST", body: form }
+        )
+        const body = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          setError(body.error ?? "Upload failed. Try again.")
+          return
+        }
+      }
+
       await finalizeSubmissionAction(sub.statusToken)
       setOutcome("verifying")
       pollStatus(sub.statusToken)
-    }
-    return true
-  }
-
-  const advance = () => {
-    setFile(null)
-    setError(null)
-    setStepIndex((i) => i + 1)
-  }
-
-  const handleEmailStep = async () => {
-    setError(null)
-    if (requirements.emailEnabled) {
-      if (!email.trim()) return setError("Enter your email to continue.")
-      if (!consent) return setError("Please accept to join the artist's list.")
-    }
-    setBusy(true)
-    try {
-      const sub = await ensureSubmission()
-      if (!sub) return
-      if (steps.length === 1) return // email-only → approved
-      advance()
     } finally {
       setBusy(false)
     }
   }
 
-  const handleProofStep = async (
-    platform: string,
-    followTargetId: string | null
-  ) => {
-    setError(null)
-    if (!file) return setError("Upload a screenshot to continue.")
-    if (!ALLOWED_TYPES.includes(file.type))
-      return setError("Screenshot must be JPG, PNG, or WEBP.")
-    if (file.size > MAX_BYTES) return setError("Screenshot is over 10MB.")
+  const totalSteps = (requirements.emailEnabled ? 1 : 0) + proofSteps.length
+  const doneSteps =
+    (requirements.emailEnabled && email.trim() && consent ? 1 : 0) +
+    proofSteps.filter((s) => files[s.key]).length
 
-    setBusy(true)
-    try {
-      const sub = await ensureSubmission()
-      if (!sub) return
-      const isLast = stepIndex === steps.length - 1
-      if (await uploadProof(sub, platform, followTargetId, isLast)) advance()
-    } finally {
-      setBusy(false)
-    }
+  // ---- terminal states ----
+  if (outcome === "verifying") {
+    return (
+      <Card>
+        <CardContent className="space-y-2 pt-6 text-center">
+          <h2 className="text-lg font-semibold">Checking your proof…</h2>
+          <p className="text-sm text-muted-foreground">
+            Usually under a minute — hang tight.
+          </p>
+        </CardContent>
+      </Card>
+    )
   }
-
-  const openProfile = (url: string) => {
-    window.open(
-      url,
-      "vividdit-follow",
-      window.innerWidth > 900 ? "width=1100,height=850,noopener" : "noopener"
+  if (outcome === "approved" && submission) {
+    return (
+      <Card>
+        <CardContent className="space-y-3 pt-6 text-center">
+          <h2 className="text-lg font-semibold">You&apos;re in! 🎉</h2>
+          <Button
+            render={<a href={`/download/by-status/${submission.statusToken}`} />}
+            nativeButton={false}
+            className="w-full"
+            style={{ backgroundColor: accent }}
+          >
+            Download the HQ file
+          </Button>
+        </CardContent>
+      </Card>
+    )
+  }
+  if ((outcome === "rejected" || outcome === "needs_review") && submission) {
+    return (
+      <Card>
+        <CardContent className="space-y-3 pt-6 text-center">
+          <h2 className="text-lg font-semibold">
+            {outcome === "rejected" ? "Couldn't verify yet" : "Almost there"}
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            {outcome === "rejected"
+              ? "We couldn't confirm your proof. Open your status page to see why and resubmit."
+              : "We're giving your proof a closer look. Check your status page for the outcome."}
+          </p>
+          <Button
+            render={<a href={`/s/${submission.statusToken}`} />}
+            nativeButton={false}
+            variant="outline"
+            className="w-full"
+          >
+            Go to status page
+          </Button>
+        </CardContent>
+      </Card>
     )
   }
 
-  const current = steps[stepIndex]
-
+  // ---- checklist ----
+  let n = 0
   return (
-    <Card>
-      <CardContent className="space-y-5 pt-6">
-        <div className="space-y-1">
-          <Progress value={progress} />
-          <p className="text-xs text-muted-foreground">
-            {outcome
-              ? outcome === "verifying"
-                ? "Verifying…"
-                : "Complete"
-              : `Step ${Math.min(stepIndex + 1, steps.length)} of ${steps.length}`}
+    <Card className={cn(dragging && "ring-2 ring-offset-2", "transition")}>
+      <CardContent className="space-y-4 pt-6">
+        <div>
+          <h2 className="text-lg font-semibold">Unlock the download</h2>
+          <p className="text-sm text-muted-foreground">
+            {totalSteps > 1
+              ? `Complete ${totalSteps} quick steps — ${doneSteps}/${totalSteps} done`
+              : "One quick step to unlock"}
           </p>
         </div>
+
+        {dragging && hasProofs && (
+          <div className="rounded-lg border border-dashed border-primary bg-muted/50 p-2 text-center text-xs font-medium">
+            📎 Drop your screenshot — it&apos;ll attach to the next open step
+          </div>
+        )}
 
         {error && (
           <Alert variant="destructive">
@@ -233,58 +360,13 @@ export function UnlockPanel({
           </Alert>
         )}
 
-        {outcome === "verifying" && (
-          <div className="space-y-2 text-center">
-            <h2 className="text-lg font-semibold">Checking your proof…</h2>
-            <p className="text-sm text-muted-foreground">
-              Usually under a minute — hang tight.
-            </p>
-          </div>
-        )}
-
-        {outcome === "approved" && submission && (
-          <div className="space-y-3 text-center">
-            <h2 className="text-lg font-semibold">You&apos;re in! 🎉</h2>
-            <Button
-              render={<a href={`/download/by-status/${submission.statusToken}`} />}
-              nativeButton={false}
-              className="w-full"
-              style={{ backgroundColor: accent }}
-            >
-              Download the HQ file
-            </Button>
-          </div>
-        )}
-
-        {(outcome === "rejected" || outcome === "needs_review") && submission && (
-          <div className="space-y-3 text-center">
-            <h2 className="text-lg font-semibold">
-              {outcome === "rejected" ? "Couldn't verify yet" : "Almost there"}
-            </h2>
-            <p className="text-sm text-muted-foreground">
-              {outcome === "rejected"
-                ? "We couldn't confirm your proof. Open your status page to see why and resubmit."
-                : "We're giving your proof a closer look. Check your status page for the outcome."}
-            </p>
-            <Button
-              render={<a href={`/s/${submission.statusToken}`} />}
-              nativeButton={false}
-              variant="outline"
-              className="w-full"
-            >
-              Go to status page
-            </Button>
-          </div>
-        )}
-
-        {!outcome && !done && current?.kind === "email" && (
-          <div className="space-y-4">
-            <div>
-              <h2 className="font-medium">Join {track.artistName}&apos;s email list</h2>
-              <p className="text-sm text-muted-foreground">
-                Enter your email to start unlocking the download.
-              </p>
-            </div>
+        {requirements.emailEnabled && (
+          <ChecklistRow
+            n={++n}
+            title={`Join ${track.artistName}'s email list`}
+            done={!!email.trim() && consent}
+            accent={accent}
+          >
             <div className="space-y-2">
               <Label htmlFor="fanEmail">Your email</Label>
               <Input
@@ -305,133 +387,179 @@ export function UnlockPanel({
               I agree to join {track.artistName}&apos;s email list and receive
               updates. Unsubscribe anytime.
             </label>
-            <Button
-              onClick={handleEmailStep}
-              disabled={busy}
-              className="w-full"
-              style={{ backgroundColor: accent }}
-            >
-              {busy ? "…" : steps.length === 1 ? "Get the download" : "Continue"}
-            </Button>
-          </div>
+          </ChecklistRow>
         )}
 
-        {!outcome && !done && current?.kind === "track" && (
-          <div className="space-y-4">
-            <div>
-              <h2 className="font-medium">On SoundCloud</h2>
-              <Button
-                onClick={() => openProfile(track.soundcloudUrl)}
-                className="mt-2 w-full"
-                style={{ backgroundColor: accent }}
+        {proofSteps.map((s) => {
+          if (s.kind === "track") {
+            return (
+              <ChecklistRow
+                key={s.key}
+                n={++n}
+                title="Like / Repost on SoundCloud"
+                done={!!files[s.key]}
+                accent={accent}
               >
-                Open the track on SoundCloud ↗
-              </Button>
-              <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
-                {requirements.requireLike && <li>♥ Tap Like (the heart)</li>}
-                {requirements.requireRepost && <li>⟳ Tap Repost</li>}
-              </ul>
-            </div>
-            {requirements.requireProofCode && submission && (
-              <div className="flex items-center gap-2 rounded-lg border p-3">
-                <code className="text-lg font-semibold tracking-wider">
-                  {submission.proofCode}
-                </code>
                 <Button
-                  size="sm"
-                  variant="outline"
-                  className="ml-auto"
-                  onClick={() =>
-                    navigator.clipboard.writeText(submission.proofCode)
-                  }
+                  onClick={handleTrackOpen}
+                  disabled={busy}
+                  className="w-full"
+                  style={{ backgroundColor: accent }}
                 >
-                  Copy
+                  Open the track on SoundCloud ↗
                 </Button>
-              </div>
-            )}
-            <ProofUpload
-              label="Screenshot the track page showing the actions done"
-              hint={
-                requirements.requireProofCode
-                  ? "Tip: paste your code into the comment box (no need to post) so it's visible."
-                  : undefined
-              }
-              onPick={setFile}
-              file={file}
-            />
-            <Button
-              onClick={() => handleProofStep("soundcloud", null)}
-              disabled={busy || !file}
-              className="w-full"
-              style={{ backgroundColor: accent }}
+                <ul className="space-y-1 text-sm text-muted-foreground">
+                  {requirements.requireLike && <li>♥ Tap Like (the heart)</li>}
+                  {requirements.requireRepost && <li>⟳ Tap Repost</li>}
+                </ul>
+                {requirements.requireProofCode &&
+                  (submission ? (
+                    <div className="flex items-center gap-2 rounded-lg border p-3">
+                      <code className="text-lg font-semibold tracking-wider">
+                        {submission.proofCode}
+                      </code>
+                      <span className="text-xs text-muted-foreground">
+                        paste into the comment box
+                      </span>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="ml-auto"
+                        onClick={() =>
+                          navigator.clipboard.writeText(submission.proofCode)
+                        }
+                      >
+                        Copy
+                      </Button>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      Tap “Open the track” to get your unique proof code.
+                    </p>
+                  ))}
+                <ProofDrop file={files[s.key]} onPick={(f) => setStepFile(s.key, f)} />
+              </ChecklistRow>
+            )
+          }
+          return (
+            <ChecklistRow
+              key={s.key}
+              n={++n}
+              title={`Follow ${s.target.displayName} on ${PLATFORM_LABEL[s.target.platform]}`}
+              done={!!files[s.key]}
+              accent={accent}
             >
-              {busy ? "Uploading…" : "Continue"}
-            </Button>
-          </div>
-        )}
-
-        {!outcome && !done && current?.kind === "follow" && (
-          <div className="space-y-4">
-            <div>
-              <h2 className="font-medium">
-                Follow {current.target.displayName} on{" "}
-                {PLATFORM_LABEL[current.target.platform]}
-              </h2>
               <Button
-                onClick={() => openProfile(current.target.profileUrl)}
-                className="mt-2 w-full"
+                onClick={() => openProfile(s.target.profileUrl)}
+                className="w-full"
                 style={{ backgroundColor: accent }}
               >
-                Open {PLATFORM_LABEL[current.target.platform]} ↗
+                Open {PLATFORM_LABEL[s.target.platform]} ↗
               </Button>
-              <p className="mt-2 text-sm text-muted-foreground">
+              <p className="text-sm text-muted-foreground">
                 Tap <strong>Follow</strong>, then screenshot the profile showing
                 “Following”.
               </p>
-            </div>
-            <ProofUpload
-              label={`Screenshot showing you follow ${current.target.displayName}`}
-              onPick={setFile}
-              file={file}
-            />
-            <Button
-              onClick={() =>
-                handleProofStep(current.target.platform, current.target.id)
-              }
-              disabled={busy || !file}
-              className="w-full"
-              style={{ backgroundColor: accent }}
-            >
-              {busy ? "Uploading…" : "Continue"}
-            </Button>
-          </div>
-        )}
+              <ProofDrop file={files[s.key]} onPick={(f) => setStepFile(s.key, f)} />
+            </ChecklistRow>
+          )
+        })}
+
+        <Button
+          onClick={handleUnlock}
+          disabled={busy}
+          className="w-full"
+          style={{ backgroundColor: accent }}
+        >
+          {busy
+            ? "Working…"
+            : hasProofs
+              ? "Unlock the download"
+              : "Get the download"}
+        </Button>
       </CardContent>
     </Card>
   )
 }
 
-function ProofUpload({
-  label,
-  hint,
+function ChecklistRow({
+  n,
+  title,
+  done,
+  accent,
+  children,
+}: {
+  n: number
+  title: string
+  done: boolean
+  accent: string
+  children: React.ReactNode
+}) {
+  return (
+    <div className="space-y-3 rounded-lg border p-4">
+      <div className="flex items-center gap-3">
+        <span
+          className="flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-white"
+          style={{ backgroundColor: done ? accent : "#a1a1aa" }}
+        >
+          {done ? "✓" : n}
+        </span>
+        <h3 className="font-medium">{title}</h3>
+      </div>
+      <div className="space-y-3 pl-9">{children}</div>
+    </div>
+  )
+}
+
+function ProofDrop({
   file,
   onPick,
 }: {
-  label: string
-  hint?: string
   file: File | null
   onPick: (f: File | null) => void
 }) {
+  const [over, setOver] = useState(false)
   return (
-    <div className="space-y-2">
-      <Label>{label}</Label>
-      <Input
+    <label
+      onDragOver={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        setOver(true)
+      }}
+      onDragLeave={(e) => {
+        e.stopPropagation()
+        setOver(false)
+      }}
+      onDrop={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        setOver(false)
+        const f = e.dataTransfer.files?.[0]
+        if (f) onPick(f)
+      }}
+      className={cn(
+        "flex cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed p-4 text-center text-sm transition-colors",
+        over
+          ? "border-primary bg-muted"
+          : file
+            ? "border-green-500/50 bg-green-50/50 dark:bg-green-950/20"
+            : "border-input hover:bg-muted/50"
+      )}
+    >
+      {file ? (
+        <span className="font-medium">✓ {file.name} — tap to replace</span>
+      ) : (
+        <>
+          <span className="font-medium">Drop your screenshot here</span>
+          <span className="text-muted-foreground">or tap to choose</span>
+        </>
+      )}
+      <input
         type="file"
         accept={ALLOWED_TYPES.join(",")}
+        className="sr-only"
         onChange={(e) => onPick(e.target.files?.[0] ?? null)}
       />
-      {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
-      {file && <p className="text-xs text-muted-foreground">✓ {file.name}</p>}
-    </div>
+    </label>
   )
 }

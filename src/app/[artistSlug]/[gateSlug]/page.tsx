@@ -186,6 +186,26 @@ export default async function GatePage({
         tracking={tracking}
         />
 
+        <details className="text-xs" style={{ color: muted(fg, 0.7) }}>
+          <summary className="cursor-pointer font-medium">
+            How do I take a screenshot?
+          </summary>
+          <div className="mt-2 space-y-1.5">
+            <p>
+              <strong>Mac:</strong> press <strong>Shift + ⌘ + 4</strong>, then
+              drag to select the area. It saves to your Desktop.
+            </p>
+            <p>
+              <strong>Windows:</strong> press <strong>⊞ Win + Shift + S</strong>{" "}
+              to snip an area, or <strong>PrtScn</strong> for the full screen.
+            </p>
+            <p>
+              <strong>iPhone:</strong> Side button + Volume Up.{" "}
+              <strong>Android:</strong> Power + Volume Down.
+            </p>
+          </div>
+        </details>
+
         <footer
           className="mt-auto flex flex-col items-center gap-1 pt-8 text-center text-xs"
           style={{ color: muted(fg, 0.5) }}
