@@ -7,7 +7,7 @@ import { runVerification } from "@/lib/verification"
 const MAX_PROOFS_PER_SUBMISSION = 15
 const NEAR_DUP_HAMMING = 8
 
-const MAX_FILES = 5
+const MAX_FILES = 10
 const MAX_BYTES = 10 * 1024 * 1024
 const ALLOWED_TYPES = new Map([
   ["image/jpeg", "jpg"],

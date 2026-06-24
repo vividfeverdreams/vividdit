@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 
 import {
   finalizeSubmissionAction,
@@ -16,6 +16,7 @@ import { fireDownloadConversion, type GateTracking } from "@/lib/tracking"
 import { cn } from "@/lib/utils"
 
 const MAX_BYTES = 10 * 1024 * 1024
+const MAX_BATCH = 10
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"]
 
 const PLATFORM_LABEL: Record<string, string> = {
@@ -53,8 +54,8 @@ type Submission = {
 }
 
 type ProofStep =
-  | { key: "track"; kind: "track" }
-  | { key: string; kind: "follow"; target: FollowTarget }
+  | { kind: "track" }
+  | { kind: "follow"; target: FollowTarget }
 
 function fileError(file: File): string | null {
   if (!ALLOWED_TYPES.includes(file.type))
@@ -79,9 +80,9 @@ export function UnlockPanel({
   const proofSteps = useMemo<ProofStep[]>(() => {
     const s: ProofStep[] = []
     if (requirements.requireLike || requirements.requireRepost)
-      s.push({ key: "track", kind: "track" })
+      s.push({ kind: "track" })
     for (const target of requirements.followTargets)
-      s.push({ key: `follow:${target.id}`, kind: "follow", target })
+      s.push({ kind: "follow", target })
     return s
   }, [requirements])
 
@@ -89,7 +90,7 @@ export function UnlockPanel({
 
   const [email, setEmail] = useState("")
   const [consent, setConsent] = useState(false)
-  const [files, setFiles] = useState<Record<string, File | null>>({})
+  const [batchFiles, setBatchFiles] = useState<File[]>([])
   const [submission, setSubmission] = useState<Submission | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -98,35 +99,31 @@ export function UnlockPanel({
     null | "verifying" | "approved" | "rejected" | "needs_review"
   >(null)
 
-  // Mirror of files for the window-level drop handler (avoids stale closures).
-  const filesRef = useRef(files)
-  filesRef.current = files
-
   useEffect(() => {
     if (outcome === "approved") fireDownloadConversion(tracking)
   }, [outcome, tracking])
 
-  const setStepFile = (key: string, file: File | null) => {
-    if (file) {
-      const err = fileError(file)
-      if (err) return setError(err)
+  const addFiles = useCallback((list: FileList | File[] | null) => {
+    if (!list) return
+    const valid: File[] = []
+    for (const f of Array.from(list)) {
+      const err = fileError(f)
+      if (err) {
+        setError(err)
+        continue
+      }
+      valid.push(f)
     }
-    setError(null)
-    setFiles((prev) => ({ ...prev, [key]: file }))
-  }
+    if (valid.length) {
+      setError(null)
+      setBatchFiles((prev) => [...prev, ...valid].slice(0, MAX_BATCH))
+    }
+  }, [])
 
-  // Drop anywhere on the page → attach to the first step still missing a shot.
-  const assignToNextEmpty = (file: File) => {
-    const err = fileError(file)
-    if (err) return setError(err)
-    const cur = filesRef.current
-    const target =
-      proofSteps.find((s) => !cur[s.key]) ?? proofSteps[proofSteps.length - 1]
-    if (!target) return
-    setError(null)
-    setFiles((prev) => ({ ...prev, [target.key]: file }))
-  }
+  const removeFile = (i: number) =>
+    setBatchFiles((prev) => prev.filter((_, j) => j !== i))
 
+  // Drop a screenshot anywhere on the page → adds it to the upload box.
   useEffect(() => {
     if (outcome || !hasProofs) return
     const hasFile = (e: DragEvent) =>
@@ -141,8 +138,7 @@ export function UnlockPanel({
       if (!hasFile(e)) return
       e.preventDefault()
       setDragging(false)
-      const f = e.dataTransfer?.files?.[0]
-      if (f) assignToNextEmpty(f)
+      addFiles(e.dataTransfer?.files ?? null)
     }
     const onLeave = (e: DragEvent) => {
       if (!e.relatedTarget) setDragging(false)
@@ -155,9 +151,7 @@ export function UnlockPanel({
       window.removeEventListener("drop", onDrop)
       window.removeEventListener("dragleave", onLeave)
     }
-    // assignToNextEmpty reads current files via filesRef
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [outcome, hasProofs, proofSteps])
+  }, [outcome, hasProofs, addFiles])
 
   const ensureSubmission = async (): Promise<Submission | null> => {
     if (submission) return submission
@@ -231,12 +225,8 @@ export function UnlockPanel({
       if (!email.trim()) return setError("Enter your email.")
       if (!consent) return setError("Please accept to join the artist's list.")
     }
-    for (const s of proofSteps) {
-      if (!files[s.key]) {
-        const label =
-          s.kind === "track" ? "the SoundCloud track" : s.target.displayName
-        return setError(`Add a screenshot for: ${label}.`)
-      }
+    if (hasProofs && batchFiles.length === 0) {
+      return setError("Add a screenshot for each step above.")
     }
 
     setBusy(true)
@@ -245,25 +235,18 @@ export function UnlockPanel({
       if (!sub) return
       if (!hasProofs) return // email-only → approved via ensureSubmission
 
-      for (const s of proofSteps) {
-        const file = files[s.key]!
-        const platform = s.kind === "track" ? "soundcloud" : s.target.platform
-        const followTargetId = s.kind === "track" ? null : s.target.id
-        const form = new FormData()
-        form.set("statusToken", sub.statusToken)
-        form.set("platform", platform)
-        form.set("finalize", "false")
-        if (followTargetId) form.set("followTargetId", followTargetId)
-        form.append("proofs", file)
-        const res = await fetch(
-          `/api/submissions/${sub.submissionId}/proofs`,
-          { method: "POST", body: form }
-        )
-        const body = await res.json().catch(() => ({}))
-        if (!res.ok) {
-          setError(body.error ?? "Upload failed. Try again.")
-          return
-        }
+      const form = new FormData()
+      form.set("statusToken", sub.statusToken)
+      form.set("finalize", "false")
+      for (const f of batchFiles) form.append("proofs", f)
+      const res = await fetch(`/api/submissions/${sub.submissionId}/proofs`, {
+        method: "POST",
+        body: form,
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setError(body.error ?? "Upload failed. Try again.")
+        return
       }
 
       await finalizeSubmissionAction(sub.statusToken)
@@ -273,11 +256,6 @@ export function UnlockPanel({
       setBusy(false)
     }
   }
-
-  const totalSteps = (requirements.emailEnabled ? 1 : 0) + proofSteps.length
-  const doneSteps =
-    (requirements.emailEnabled && email.trim() && consent ? 1 : 0) +
-    proofSteps.filter((s) => files[s.key]).length
 
   // ---- terminal states ----
   if (outcome === "verifying") {
@@ -342,17 +320,11 @@ export function UnlockPanel({
         <div>
           <h2 className="text-lg font-semibold">Unlock the download</h2>
           <p className="text-sm text-muted-foreground">
-            {totalSteps > 1
-              ? `Complete ${totalSteps} quick steps — ${doneSteps}/${totalSteps} done`
-              : "One quick step to unlock"}
+            {hasProofs
+              ? "Do each step, then upload your screenshots below."
+              : "One quick step to unlock."}
           </p>
         </div>
-
-        {dragging && hasProofs && (
-          <div className="rounded-lg border border-dashed border-primary bg-muted/50 p-2 text-center text-xs font-medium">
-            📎 Drop your screenshot — it&apos;ll attach to the next open step
-          </div>
-        )}
 
         {error && (
           <Alert variant="destructive">
@@ -394,32 +366,33 @@ export function UnlockPanel({
           if (s.kind === "track") {
             return (
               <ChecklistRow
-                key={s.key}
+                key="track"
                 n={++n}
                 title="Like / Repost on SoundCloud"
-                done={!!files[s.key]}
                 accent={accent}
+                action={
+                  <Button
+                    size="sm"
+                    onClick={handleTrackOpen}
+                    disabled={busy}
+                    style={{ backgroundColor: accent }}
+                  >
+                    Open ↗
+                  </Button>
+                }
               >
-                <Button
-                  onClick={handleTrackOpen}
-                  disabled={busy}
-                  className="w-full"
-                  style={{ backgroundColor: accent }}
-                >
-                  Open the track on SoundCloud ↗
-                </Button>
                 <ul className="space-y-1 text-sm text-muted-foreground">
                   {requirements.requireLike && <li>♥ Tap Like (the heart)</li>}
                   {requirements.requireRepost && <li>⟳ Tap Repost</li>}
                 </ul>
                 {requirements.requireProofCode &&
                   (submission ? (
-                    <div className="flex items-center gap-2 rounded-lg border p-3">
-                      <code className="text-lg font-semibold tracking-wider">
+                    <div className="flex items-center gap-2 rounded-lg border p-2">
+                      <code className="text-base font-semibold tracking-wider">
                         {submission.proofCode}
                       </code>
                       <span className="text-xs text-muted-foreground">
-                        paste into the comment box
+                        paste in the comment box
                       </span>
                       <Button
                         size="sm"
@@ -434,36 +407,52 @@ export function UnlockPanel({
                     </div>
                   ) : (
                     <p className="text-xs text-muted-foreground">
-                      Tap “Open the track” to get your unique proof code.
+                      Tap “Open ↗” to get your unique proof code.
                     </p>
                   ))}
-                <ProofDrop file={files[s.key]} onPick={(f) => setStepFile(s.key, f)} />
               </ChecklistRow>
             )
           }
           return (
             <ChecklistRow
-              key={s.key}
+              key={s.target.id}
               n={++n}
               title={`Follow ${s.target.displayName} on ${PLATFORM_LABEL[s.target.platform]}`}
-              done={!!files[s.key]}
               accent={accent}
+              action={
+                <Button
+                  size="sm"
+                  onClick={() => openProfile(s.target.profileUrl)}
+                  style={{ backgroundColor: accent }}
+                >
+                  Open ↗
+                </Button>
+              }
             >
-              <Button
-                onClick={() => openProfile(s.target.profileUrl)}
-                className="w-full"
-                style={{ backgroundColor: accent }}
-              >
-                Open {PLATFORM_LABEL[s.target.platform]} ↗
-              </Button>
               <p className="text-sm text-muted-foreground">
                 Tap <strong>Follow</strong>, then screenshot the profile showing
                 “Following”.
               </p>
-              <ProofDrop file={files[s.key]} onPick={(f) => setStepFile(s.key, f)} />
             </ChecklistRow>
           )
         })}
+
+        {hasProofs && (
+          <div className="space-y-2 rounded-lg border p-4">
+            <h3 className="font-medium">Upload your screenshots</h3>
+            <p className="text-xs text-muted-foreground">
+              Add one for each step above ({proofSteps.length}). Drop them
+              anywhere on the page or tap to choose — the AI matches each to its
+              step.
+            </p>
+            <BatchDrop
+              files={batchFiles}
+              dragging={dragging}
+              onAdd={addFiles}
+              onRemove={removeFile}
+            />
+          </div>
+        )}
 
         <Button
           onClick={handleUnlock}
@@ -487,16 +476,18 @@ function ChecklistRow({
   title,
   done,
   accent,
+  action,
   children,
 }: {
   n: number
   title: string
-  done: boolean
+  done?: boolean
   accent: string
-  children: React.ReactNode
+  action?: React.ReactNode
+  children?: React.ReactNode
 }) {
   return (
-    <div className="space-y-3 rounded-lg border p-4">
+    <div className="space-y-2 rounded-lg border p-4">
       <div className="flex items-center gap-3">
         <span
           className="flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-white"
@@ -504,62 +495,81 @@ function ChecklistRow({
         >
           {done ? "✓" : n}
         </span>
-        <h3 className="font-medium">{title}</h3>
+        <h3 className="flex-1 font-medium">{title}</h3>
+        {action}
       </div>
-      <div className="space-y-3 pl-9">{children}</div>
+      {children && <div className="space-y-2 pl-9">{children}</div>}
     </div>
   )
 }
 
-function ProofDrop({
-  file,
-  onPick,
+function BatchDrop({
+  files,
+  dragging,
+  onAdd,
+  onRemove,
 }: {
-  file: File | null
-  onPick: (f: File | null) => void
+  files: File[]
+  dragging: boolean
+  onAdd: (list: FileList | File[] | null) => void
+  onRemove: (i: number) => void
 }) {
   const [over, setOver] = useState(false)
   return (
-    <label
-      onDragOver={(e) => {
-        e.preventDefault()
-        e.stopPropagation()
-        setOver(true)
-      }}
-      onDragLeave={(e) => {
-        e.stopPropagation()
-        setOver(false)
-      }}
-      onDrop={(e) => {
-        e.preventDefault()
-        e.stopPropagation()
-        setOver(false)
-        const f = e.dataTransfer.files?.[0]
-        if (f) onPick(f)
-      }}
-      className={cn(
-        "flex cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed p-4 text-center text-sm transition-colors",
-        over
-          ? "border-primary bg-muted"
-          : file
-            ? "border-green-500/50 bg-green-50/50 dark:bg-green-950/20"
+    <div className="space-y-2">
+      <label
+        onDragOver={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          setOver(true)
+        }}
+        onDragLeave={(e) => {
+          e.stopPropagation()
+          setOver(false)
+        }}
+        onDrop={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          setOver(false)
+          onAdd(e.dataTransfer.files)
+        }}
+        className={cn(
+          "flex cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed p-5 text-center text-sm transition-colors",
+          over || dragging
+            ? "border-primary bg-muted"
             : "border-input hover:bg-muted/50"
+        )}
+      >
+        <span className="font-medium">Drop your screenshots here</span>
+        <span className="text-muted-foreground">or tap to choose</span>
+        <input
+          type="file"
+          accept={ALLOWED_TYPES.join(",")}
+          multiple
+          className="sr-only"
+          onChange={(e) => onAdd(e.target.files)}
+        />
+      </label>
+      {files.length > 0 && (
+        <ul className="space-y-1 text-sm">
+          {files.map((f, i) => (
+            <li
+              key={`${f.name}-${i}`}
+              className="flex items-center gap-2 rounded-md border px-2 py-1"
+            >
+              <span className="truncate">✓ {f.name}</span>
+              <button
+                type="button"
+                onClick={() => onRemove(i)}
+                className="ml-auto text-muted-foreground hover:text-foreground"
+                aria-label={`Remove ${f.name}`}
+              >
+                ✕
+              </button>
+            </li>
+          ))}
+        </ul>
       )}
-    >
-      {file ? (
-        <span className="font-medium">✓ {file.name} — tap to replace</span>
-      ) : (
-        <>
-          <span className="font-medium">Drop your screenshot here</span>
-          <span className="text-muted-foreground">or tap to choose</span>
-        </>
-      )}
-      <input
-        type="file"
-        accept={ALLOWED_TYPES.join(",")}
-        className="sr-only"
-        onChange={(e) => onPick(e.target.files?.[0] ?? null)}
-      />
-    </label>
+    </div>
   )
 }

@@ -58,10 +58,9 @@ const OUTCOME_SCHEMA = {
   required: ["results", "tampering_suspected", "confidence", "fan_message"],
 } as const
 
-type Item = {
+type Requirement = {
   label: string
   requirement: string
-  storagePath: string
 }
 
 export function decideFinalStatus(
@@ -92,34 +91,40 @@ export function decideFinalStatus(
 }
 
 function buildPrompt(
-  items: Item[],
+  requirements: Requirement[],
   ctx: { proofCode: string | null }
 ): string {
-  const lines = items
-    .map((it, i) => `- Image ${i + 1}: ${it.requirement}`)
+  const lines = requirements
+    .map((r, i) => `${i + 1}. ${r.requirement}`)
     .join("\n")
-  return `You verify fan-submitted screenshots for a music download gate. Each
-image proves one requirement. Return a "results" array with one entry per
-image, in the SAME order, each {confirmed, note}.
+  return `You verify fan-submitted screenshots for a music download gate. You are
+given a SET of screenshots in NO PARTICULAR ORDER, and a numbered list of
+requirements. For EACH requirement, decide whether AT LEAST ONE of the
+screenshots clearly proves it was done. A single screenshot may satisfy more
+than one requirement, and extra/unrelated screenshots are fine.
 
-Requirements (in image order):
+Return a "results" array with one entry per requirement, in the SAME order as
+listed below, each {confirmed, note}.
+
+Requirements:
 ${lines}
 
 ${
   ctx.proofCode
-    ? `For the SoundCloud track image, fans were asked to type the code
+    ? `For the SoundCloud track requirement, fans were asked to type the code
 "${ctx.proofCode}" into the comment box. A visible matching code is strong
 evidence the screenshot is fresh; a missing code lowers confidence but is not
 an automatic fail.`
     : ""
 }
 
-For each image: confirm it's really the right platform and shows the required
-action in its done state (red/active heart, active repost, or "Following" on
-the exact profile named). Set confirmed=false if it's the wrong platform,
-wrong profile/track, or the action isn't clearly shown. tampering_suspected:
-edited, stitched, or AI-generated images, or a photo of another screen.
-fan_message: short, friendly, specific — tell the fan exactly what to redo.`
+Set confirmed=true for a requirement only when at least one screenshot clearly
+shows it: the right platform, the right profile/track, and the action in its
+done state (red/active heart, active repost, or "Following" on the exact
+profile named). Set confirmed=false if no screenshot shows it, or it's the
+wrong platform/profile/track. tampering_suspected: any edited, stitched, or
+AI-generated images, or a photo of another screen. fan_message: short,
+friendly, specific — tell the fan exactly which steps are still missing.`
 }
 
 // Sends the verification request to the creator's provider and returns the raw
@@ -282,11 +287,10 @@ export async function runVerification(submissionId: string): Promise<void> {
     .update({ status: "verifying" })
     .eq("id", submissionId)
 
-  // Latest proof per requirement (handles resubmissions: newest wins).
-  const latest = <T extends { created_at: string }>(arr: T[]) =>
-    arr.length ? arr[arr.length - 1] : null
-
-  const items: Item[] = []
+  // The required actions, as a checklist. Each fan-uploaded screenshot is no
+  // longer tagged to a specific requirement; instead the AI checks every
+  // requirement against the whole set of screenshots (order-independent).
+  const requirements: Requirement[] = []
 
   if (trackActions) {
     const actions = [
@@ -295,21 +299,17 @@ export async function runVerification(submissionId: string): Promise<void> {
     ]
       .filter(Boolean)
       .join(" and ")
-    const trackProof = latest(proofs.filter((p) => !p.follow_target_id))
-    items.push({
+    requirements.push({
       label: "SoundCloud track",
       requirement: `On the SoundCloud track "${gate.title}" by ${gate.artist}: ${actions}.`,
-      storagePath: trackProof?.storage_path ?? "",
     })
   }
 
   for (const t of followTargets) {
-    const proof = latest(proofs.filter((p) => p.follow_target_id === t.id))
     const who = t.display_name || t.profile_url
-    items.push({
+    requirements.push({
       label: `Follow ${who} (${t.platform})`,
       requirement: `FOLLOW ${who} on ${t.platform} (profile/page at ${t.profile_url} must show "Following").`,
-      storagePath: proof?.storage_path ?? "",
     })
   }
 
@@ -324,17 +324,17 @@ export async function runVerification(submissionId: string): Promise<void> {
 
   if (!stored) {
     error = "Creator has no verification (AI) key configured."
-  } else if (items.some((it) => !it.storagePath)) {
-    error = "Some required screenshots are missing."
+  } else if (requirements.length === 0 || proofs.length === 0) {
+    error = "No screenshots to verify."
   } else {
     try {
       const images: string[] = []
-      for (const it of items) {
+      for (const p of proofs) {
         const { data: blob, error: dlErr } = await admin.storage
           .from("proofs")
-          .download(it.storagePath)
+          .download(p.storage_path)
         if (dlErr || !blob) throw new Error("Couldn't load proof image")
-        const ext = it.storagePath.split(".").pop()
+        const ext = p.storage_path.split(".").pop()
         const mime =
           ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg"
         images.push(
@@ -346,7 +346,7 @@ export async function runVerification(submissionId: string): Promise<void> {
         provider: stored.provider,
         key: stored.key,
         model: stored.model,
-        prompt: buildPrompt(items, { proofCode }),
+        prompt: buildPrompt(requirements, { proofCode }),
         images,
       })
       usage = tokenUsage
@@ -356,7 +356,7 @@ export async function runVerification(submissionId: string): Promise<void> {
       }
       outcome = {
         results: parsed.results.map((r, i) => ({
-          label: items[i]?.label ?? `Item ${i + 1}`,
+          label: requirements[i]?.label ?? `Requirement ${i + 1}`,
           confirmed: r.confirmed,
           note: r.note,
         })),
@@ -371,7 +371,7 @@ export async function runVerification(submissionId: string): Promise<void> {
 
   const finalStatus = decideFinalStatus(
     outcome,
-    items.length,
+    requirements.length,
     (submission.fraud_flags as string[]) ?? []
   )
 
@@ -379,7 +379,7 @@ export async function runVerification(submissionId: string): Promise<void> {
     submission_id: submissionId,
     provider,
     model,
-    criteria: { items: items.map((it) => it.label), proofCode },
+    criteria: { items: requirements.map((r) => r.label), proofCode },
     result: outcome,
     decision:
       finalStatus === "approved"
