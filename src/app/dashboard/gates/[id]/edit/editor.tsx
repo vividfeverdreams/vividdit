@@ -10,9 +10,11 @@ import { setGateInVault } from "@/app/dashboard/vault-actions"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { extractPaletteFromImage } from "@/lib/palette-client"
+import { uploadCoverImage } from "@/lib/uploads"
 
 type Initial = {
   accentColor: string
@@ -75,9 +77,32 @@ export function GateEditor({
   const [igFollows, setIgFollows] = useState<string[]>(initial.igFollows)
   const [spFollows, setSpFollows] = useState<string[]>(initial.spFollows)
 
+  const [coverPath, setCoverPath] = useState<string | null>(null)
+  const [coverPreview, setCoverPreview] = useState<string | null>(null)
+  const [coverUploading, setCoverUploading] = useState(false)
   const [pullingColors, setPullingColors] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  const previewCover = coverPreview ?? coverUrl
+
+  const onCoverFile = async (file: File | undefined) => {
+    if (!file) return
+    setError(null)
+    if (file.size > 10 * 1024 * 1024) {
+      setError("Cover image is over the 10MB limit.")
+      return
+    }
+    try {
+      setCoverPreview(URL.createObjectURL(file))
+      setCoverUploading(true)
+      setCoverPath(await uploadCoverImage(file))
+    } catch {
+      setError("Cover upload failed. Try again.")
+    } finally {
+      setCoverUploading(false)
+    }
+  }
 
   const trackActions = requireLike || requireRepost
   const allFollows = [
@@ -88,10 +113,10 @@ export function GateEditor({
   const aiGate = trackActions || allFollows.length > 0
 
   const pullColors = async () => {
-    if (!coverUrl) return
+    if (!previewCover) return
     setPullingColors(true)
     try {
-      const palette = await extractPaletteFromImage(coverUrl)
+      const palette = await extractPaletteFromImage(previewCover)
       if (palette) {
         setAccentColor(palette.accent)
         setBackgroundColor(palette.background)
@@ -109,6 +134,7 @@ export function GateEditor({
         gateId,
         accentColor,
         backgroundColor,
+        coverPath,
         emailEnabled,
         requireLike,
         requireRepost,
@@ -288,10 +314,29 @@ export function GateEditor({
         </Card>
       )}
 
-      {/* Colors */}
+      {/* Cover & colors */}
       <Card>
         <CardContent className="space-y-4 pt-6">
-          <h2 className="font-medium">Colors</h2>
+          <h2 className="font-medium">Cover &amp; colors</h2>
+
+          <div className="space-y-2">
+            <Label htmlFor="cover">Cover image{isVault ? "" : " (optional)"}</Label>
+            <Input
+              id="cover"
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              onChange={(e) => onCoverFile(e.target.files?.[0])}
+              disabled={coverUploading}
+            />
+            <p className="text-xs text-muted-foreground">
+              {coverUploading
+                ? "Uploading…"
+                : isVault
+                  ? "Shown as the hero image on your vault page."
+                  : "Replaces the gate's cover art."}
+            </p>
+          </div>
+
           <div className="flex flex-wrap gap-6">
             <div className="space-y-2">
               <Label htmlFor="accent">Accent color</Label>
@@ -320,7 +365,7 @@ export function GateEditor({
               </div>
             </div>
           </div>
-          {coverUrl && (
+          {previewCover && (
             <Button
               type="button"
               variant="outline"
@@ -337,7 +382,7 @@ export function GateEditor({
             <GatePreview
               accent={accentColor}
               background={backgroundColor}
-              coverUrl={coverUrl}
+              coverUrl={previewCover}
               title={title}
               artist={artist}
             />

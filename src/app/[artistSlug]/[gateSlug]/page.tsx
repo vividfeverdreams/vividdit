@@ -182,18 +182,27 @@ export default async function GatePage({
         <div className="flex flex-col gap-2.5 md:w-[320px] md:shrink-0">
         {isVault ? (
           <>
-            {vaultCovers.length > 0 && (
-              <div className="mx-auto grid w-44 grid-cols-3 gap-1 md:w-full">
-                {vaultCovers.slice(0, 9).map((src, i) => (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    key={i}
-                    src={src}
-                    alt=""
-                    className="aspect-square w-full rounded-md object-cover shadow"
-                  />
-                ))}
-              </div>
+            {cover ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={cover}
+                alt={`${gate.title} cover art`}
+                className="mx-auto aspect-square w-28 rounded-xl object-cover shadow-lg md:w-full"
+              />
+            ) : (
+              vaultCovers.length > 0 && (
+                <div className="mx-auto grid w-44 grid-cols-3 gap-1 md:w-full">
+                  {vaultCovers.slice(0, 9).map((src, i) => (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      key={i}
+                      src={src}
+                      alt=""
+                      className="aspect-square w-full rounded-md object-cover shadow"
+                    />
+                  ))}
+                </div>
+              )
             )}
             <div className="text-center">
               <p

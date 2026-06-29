@@ -13,6 +13,7 @@ const updateGateSchema = z.object({
   gateId: z.uuid(),
   accentColor: hex,
   backgroundColor: hex,
+  coverPath: z.string().max(400).nullable().optional(),
   emailEnabled: z.boolean(),
   requireLike: z.boolean(),
   requireRepost: z.boolean(),
@@ -73,18 +74,27 @@ export async function updateGateAction(
 
   // Colors — preserve any other theme fields (e.g. artworkUrl).
   const theme = (gate.theme ?? {}) as Record<string, unknown>
+  const update: Record<string, unknown> = {
+    theme: {
+      ...theme,
+      accentColor: d.accentColor,
+      backgroundColor: d.backgroundColor,
+    },
+  }
+  // Only touch the cover when a freshly-uploaded path is provided, and only
+  // within the creator's own storage namespace.
+  if (d.coverPath) {
+    if (!d.coverPath.startsWith(`${user.id}/`) || d.coverPath.includes("..")) {
+      return { ok: false, error: "Invalid cover path." }
+    }
+    update.cover_path = d.coverPath
+  }
   const { error: gateError } = await supabase
     .from("gates")
-    .update({
-      theme: {
-        ...theme,
-        accentColor: d.accentColor,
-        backgroundColor: d.backgroundColor,
-      },
-    })
+    .update(update)
     .eq("id", d.gateId)
     .eq("creator_id", user.id)
-  if (gateError) return { ok: false, error: "Couldn't save the colors." }
+  if (gateError) return { ok: false, error: "Couldn't save the changes." }
 
   const hasSc = targets.some((t) => t.platform === "soundcloud")
   const { error: reqError } = await supabase
