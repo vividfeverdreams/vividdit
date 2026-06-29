@@ -46,8 +46,11 @@ async function loadGate(params: Params) {
     .eq("gate_id", gate.id)
     .order("sort_order", { ascending: true })
 
-  // Vault: gather the cover art of every bundled track for the hero grid.
+  // Vault: every published, included track. A published single gate always has
+  // a download file (the publish guard requires one), so this count is exactly
+  // what a fan unlocks. Covers are only for the hero grid (capped for layout).
   let vaultCovers: string[] = []
+  let vaultTrackCount = 0
   if (gate.kind === "vault") {
     const { data: tracks } = await supabase
       .from("gates")
@@ -57,7 +60,7 @@ async function loadGate(params: Params) {
       .eq("in_vault", true)
       .eq("status", "published")
       .order("created_at", { ascending: false })
-      .limit(12)
+    vaultTrackCount = (tracks ?? []).length
     vaultCovers = (tracks ?? [])
       .map((t) =>
         coverUrl({
@@ -66,6 +69,7 @@ async function loadGate(params: Params) {
         })
       )
       .filter((u): u is string => !!u)
+      .slice(0, 12)
   }
 
   return {
@@ -74,6 +78,7 @@ async function loadGate(params: Params) {
     requirements,
     followTargets: followTargets ?? [],
     vaultCovers,
+    vaultTrackCount,
   }
 }
 
@@ -148,7 +153,8 @@ export default async function GatePage({
   const data = await loadGate(p)
   if (!data) notFound()
 
-  const { profile, gate, requirements, followTargets, vaultCovers } = data
+  const { profile, gate, requirements, followTargets, vaultCovers, vaultTrackCount } =
+    data
   const isVault = gate.kind === "vault"
   const theme = (gate.theme ?? {}) as {
     accentColor?: string
@@ -213,8 +219,8 @@ export default async function GatePage({
               </p>
               <h1 className="text-xl font-bold leading-tight">{gate.title}</h1>
               <p className="text-sm" style={{ color: muted(fg, 0.7) }}>
-                {vaultCovers.length} track{vaultCovers.length === 1 ? "" : "s"} ·
-                unlock once, get them all
+                {vaultTrackCount} track{vaultTrackCount === 1 ? "" : "s"} · unlock
+                once, get them all
               </p>
             </div>
           </>
