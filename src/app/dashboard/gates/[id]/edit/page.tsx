@@ -20,11 +20,29 @@ export default async function EditGatePage({
 
   const { data: gate } = await supabase
     .from("gates")
-    .select("id, title, artist, status, theme, cover_path")
+    .select("id, title, artist, status, theme, cover_path, kind")
     .eq("id", id)
     .eq("creator_id", user.id)
     .maybeSingle()
   if (!gate) notFound()
+
+  const isVault = gate.kind === "vault"
+
+  // For a vault, the creator picks which of their published tracks are bundled.
+  const { data: vaultTrackRows } = isVault
+    ? await supabase
+        .from("gates")
+        .select("id, title, in_vault")
+        .eq("creator_id", user.id)
+        .eq("kind", "single")
+        .eq("status", "published")
+        .order("created_at", { ascending: false })
+    : { data: null }
+  const vaultTracks = (vaultTrackRows ?? []).map((t) => ({
+    id: t.id,
+    title: t.title,
+    inVault: t.in_vault,
+  }))
 
   const [{ data: req }, { data: targets }, validKey] = await Promise.all([
     supabase
@@ -61,6 +79,8 @@ export default async function EditGatePage({
       artist={gate.artist}
       coverUrl={coverUrl}
       hasValidKey={validKey}
+      isVault={isVault}
+      vaultTracks={vaultTracks}
       initial={{
         accentColor: theme.accentColor ?? "#18181b",
         backgroundColor: theme.backgroundColor ?? "#0a0a0a",

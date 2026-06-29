@@ -25,7 +25,7 @@ async function loadGate(params: Params) {
   const { data: gate } = await supabase
     .from("gates")
     .select(
-      "id, title, artist, soundcloud_url, instagram_url, spotify_url, slug, status, theme, cover_path, tracking"
+      "id, title, artist, soundcloud_url, instagram_url, spotify_url, slug, status, theme, cover_path, tracking, kind"
     )
     .eq("creator_id", profile.id)
     .eq("slug", params.gateSlug)
@@ -46,7 +46,35 @@ async function loadGate(params: Params) {
     .eq("gate_id", gate.id)
     .order("sort_order", { ascending: true })
 
-  return { profile, gate, requirements, followTargets: followTargets ?? [] }
+  // Vault: gather the cover art of every bundled track for the hero grid.
+  let vaultCovers: string[] = []
+  if (gate.kind === "vault") {
+    const { data: tracks } = await supabase
+      .from("gates")
+      .select("cover_path, theme")
+      .eq("creator_id", profile.id)
+      .eq("kind", "single")
+      .eq("in_vault", true)
+      .eq("status", "published")
+      .order("created_at", { ascending: false })
+      .limit(12)
+    vaultCovers = (tracks ?? [])
+      .map((t) =>
+        coverUrl({
+          cover_path: t.cover_path,
+          theme: t.theme as { artworkUrl?: string | null } | null,
+        })
+      )
+      .filter((u): u is string => !!u)
+  }
+
+  return {
+    profile,
+    gate,
+    requirements,
+    followTargets: followTargets ?? [],
+    vaultCovers,
+  }
 }
 
 export async function generateMetadata({
@@ -120,7 +148,8 @@ export default async function GatePage({
   const data = await loadGate(p)
   if (!data) notFound()
 
-  const { profile, gate, requirements, followTargets } = data
+  const { profile, gate, requirements, followTargets, vaultCovers } = data
+  const isVault = gate.kind === "vault"
   const theme = (gate.theme ?? {}) as {
     accentColor?: string
     backgroundColor?: string
@@ -149,38 +178,71 @@ export default async function GatePage({
       style={{ backgroundColor: background, color: fg }}
     >
       <div className="flex w-full max-w-md flex-col gap-3 md:max-w-3xl md:flex-row md:items-center md:gap-8">
-        {/* Media — cover, title, player */}
+        {/* Media — cover, title, player (single) or vault hero */}
         <div className="flex flex-col gap-2.5 md:w-[320px] md:shrink-0">
-        {cover && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={cover}
-            alt={`${gate.title} cover art`}
-            className="mx-auto aspect-square w-28 rounded-xl object-cover shadow-lg md:w-full"
-          />
-        )}
-        <div className="text-center">
-          <p
-            className="text-[11px] font-medium tracking-widest uppercase"
-            style={{ color: labelColor }}
-          >
-            Free download
-          </p>
-          <h1 className="text-xl font-bold leading-tight">{gate.title}</h1>
-          <p className="text-sm" style={{ color: muted(fg, 0.7) }}>
-            {gate.artist}
-          </p>
-        </div>
+        {isVault ? (
+          <>
+            {vaultCovers.length > 0 && (
+              <div className="mx-auto grid w-44 grid-cols-3 gap-1 md:w-full">
+                {vaultCovers.slice(0, 9).map((src, i) => (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    key={i}
+                    src={src}
+                    alt=""
+                    className="aspect-square w-full rounded-md object-cover shadow"
+                  />
+                ))}
+              </div>
+            )}
+            <div className="text-center">
+              <p
+                className="text-[11px] font-medium tracking-widest uppercase"
+                style={{ color: labelColor }}
+              >
+                Free download
+              </p>
+              <h1 className="text-xl font-bold leading-tight">{gate.title}</h1>
+              <p className="text-sm" style={{ color: muted(fg, 0.7) }}>
+                {vaultCovers.length} track{vaultCovers.length === 1 ? "" : "s"} ·
+                unlock once, get them all
+              </p>
+            </div>
+          </>
+        ) : (
+          <>
+            {cover && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={cover}
+                alt={`${gate.title} cover art`}
+                className="mx-auto aspect-square w-28 rounded-xl object-cover shadow-lg md:w-full"
+              />
+            )}
+            <div className="text-center">
+              <p
+                className="text-[11px] font-medium tracking-widest uppercase"
+                style={{ color: labelColor }}
+              >
+                Free download
+              </p>
+              <h1 className="text-xl font-bold leading-tight">{gate.title}</h1>
+              <p className="text-sm" style={{ color: muted(fg, 0.7) }}>
+                {gate.artist}
+              </p>
+            </div>
 
-        <iframe
-          title={`${gate.title} on SoundCloud`}
-          width="100%"
-          height="120"
-          scrolling="no"
-          frameBorder="no"
-          allow="autoplay"
-          src={soundcloudPlayerSrc(gate.soundcloud_url)}
-        />
+            <iframe
+              title={`${gate.title} on SoundCloud`}
+              width="100%"
+              height="120"
+              scrolling="no"
+              frameBorder="no"
+              allow="autoplay"
+              src={soundcloudPlayerSrc(gate.soundcloud_url)}
+            />
+          </>
+        )}
         </div>
 
         {/* Checklist — sits beside the media on desktop */}
@@ -207,6 +269,7 @@ export default async function GatePage({
           artistName: profile.artist_name ?? gate.artist,
         }}
         tracking={tracking}
+        isVault={isVault}
         />
 
         <details className="text-xs" style={{ color: muted(fg, 0.7) }}>

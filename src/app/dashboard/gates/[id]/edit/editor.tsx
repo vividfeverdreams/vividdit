@@ -6,6 +6,7 @@ import { useState } from "react"
 
 import { updateGateAction } from "@/app/dashboard/gates/[id]/edit/actions"
 import { FollowList, GatePreview } from "@/app/dashboard/gates/new/wizard"
+import { setGateInVault } from "@/app/dashboard/vault-actions"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -25,6 +26,8 @@ type Initial = {
   spFollows: string[]
 }
 
+type VaultTrack = { id: string; title: string; inVault: boolean }
+
 export function GateEditor({
   gateId,
   status,
@@ -32,6 +35,8 @@ export function GateEditor({
   artist,
   coverUrl,
   hasValidKey,
+  isVault = false,
+  vaultTracks = [],
   initial,
 }: {
   gateId: string
@@ -40,9 +45,19 @@ export function GateEditor({
   artist: string
   coverUrl: string | null
   hasValidKey: boolean
+  isVault?: boolean
+  vaultTracks?: VaultTrack[]
   initial: Initial
 }) {
   const router = useRouter()
+
+  const [included, setIncluded] = useState<Record<string, boolean>>(
+    Object.fromEntries(vaultTracks.map((t) => [t.id, t.inVault]))
+  )
+  const toggleVaultTrack = (id: string, value: boolean) => {
+    setIncluded((prev) => ({ ...prev, [id]: value }))
+    void setGateInVault(id, value)
+  }
 
   const [accentColor, setAccentColor] = useState(initial.accentColor)
   const [backgroundColor, setBackgroundColor] = useState(initial.backgroundColor)
@@ -164,41 +179,43 @@ export function GateEditor({
             </Alert>
           )}
 
-          <div className="space-y-3 rounded-lg border p-4">
-            <p className="text-sm font-medium">SoundCloud track actions</p>
-            {(
-              [
-                ["Like the track", requireLike, setRequireLike],
-                ["Repost the track", requireRepost, setRequireRepost],
-              ] as const
-            ).map(([label, checked, set]) => (
-              <label key={label} className="flex items-center gap-3 text-sm">
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  onChange={(e) => set(e.target.checked)}
-                  className="size-4"
-                />
-                {label}
-              </label>
-            ))}
-            {trackActions && (
-              <div className="flex items-center justify-between border-t pt-3">
-                <div>
-                  <Label htmlFor="proofCode">Proof code</Label>
-                  <p className="text-sm text-muted-foreground">
-                    Fans paste a unique code into the comment box — strong
-                    anti-fake signal.
-                  </p>
+          {!isVault && (
+            <div className="space-y-3 rounded-lg border p-4">
+              <p className="text-sm font-medium">SoundCloud track actions</p>
+              {(
+                [
+                  ["Like the track", requireLike, setRequireLike],
+                  ["Repost the track", requireRepost, setRequireRepost],
+                ] as const
+              ).map(([label, checked, set]) => (
+                <label key={label} className="flex items-center gap-3 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={(e) => set(e.target.checked)}
+                    className="size-4"
+                  />
+                  {label}
+                </label>
+              ))}
+              {trackActions && (
+                <div className="flex items-center justify-between border-t pt-3">
+                  <div>
+                    <Label htmlFor="proofCode">Proof code</Label>
+                    <p className="text-sm text-muted-foreground">
+                      Fans paste a unique code into the comment box — strong
+                      anti-fake signal.
+                    </p>
+                  </div>
+                  <Switch
+                    id="proofCode"
+                    checked={requireProofCode}
+                    onCheckedChange={setRequireProofCode}
+                  />
                 </div>
-                <Switch
-                  id="proofCode"
-                  checked={requireProofCode}
-                  onCheckedChange={setRequireProofCode}
-                />
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          )}
 
           <div className="space-y-4 rounded-lg border p-4">
             <p className="text-sm font-medium">Follow profiles</p>
@@ -223,6 +240,44 @@ export function GateEditor({
           </div>
         </CardContent>
       </Card>
+
+      {/* Tracks in the vault */}
+      {isVault && (
+        <Card>
+          <CardContent className="space-y-3 pt-6">
+            <div>
+              <h2 className="font-medium">Tracks in your vault</h2>
+              <p className="text-sm text-muted-foreground">
+                New published tracks are added automatically. Toggle any off to
+                leave it out of the vault.
+              </p>
+            </div>
+            {vaultTracks.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No published tracks yet — publish a gate and it&apos;ll show up
+                here.
+              </p>
+            ) : (
+              <ul className="divide-y rounded-lg border">
+                {vaultTracks.map((t) => (
+                  <li
+                    key={t.id}
+                    className="flex items-center gap-3 px-3 py-2.5"
+                  >
+                    <span className="min-w-0 flex-1 truncate text-sm">
+                      {t.title}
+                    </span>
+                    <Switch
+                      checked={included[t.id] ?? true}
+                      onCheckedChange={(v) => toggleVaultTrack(t.id, v)}
+                    />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Colors */}
       <Card>

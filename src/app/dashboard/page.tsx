@@ -1,6 +1,7 @@
 import Link from "next/link"
 
 import { publishGate, setGateArchived } from "@/app/dashboard/actions"
+import { setVaultEnabledAction } from "@/app/dashboard/vault-actions"
 import { CopyUrlButton } from "@/app/dashboard/copy-url-button"
 import { SortSelect } from "@/app/dashboard/sort-select"
 import { Badge } from "@/components/ui/badge"
@@ -51,7 +52,9 @@ export default async function GatesPage({
     await Promise.all([
       supabase
         .from("gates")
-        .select("id, title, artist, slug, status, created_at, cover_path, theme")
+        .select(
+          "id, title, artist, slug, status, created_at, cover_path, theme, kind, in_vault"
+        )
         .eq("creator_id", user!.id),
       supabase.from("profiles").select("artist_slug").eq("id", user!.id).single(),
       supabase.from("gate_stats").select("gate_id, views, downloads, emails"),
@@ -72,11 +75,15 @@ export default async function GatesPage({
 
   const all = (gatesRaw ?? []).map((g) => ({ ...g, stat: statFor(g.id) }))
 
+  // The vault is shown in its own card, not the gate list.
+  const vault = all.find((g) => g.kind === "vault") ?? null
+  const singles = all.filter((g) => g.kind === "single")
+
   // "archived" is a filter; the rest are sorts over non-archived gates.
   const gates =
     sort === "archived"
-      ? all.filter((g) => g.status === "archived")
-      : all.filter((g) => g.status !== "archived")
+      ? singles.filter((g) => g.status === "archived")
+      : singles.filter((g) => g.status !== "archived")
 
   gates.sort((a, b) => {
     if (sort === "visits") return b.stat.views - a.stat.views
@@ -101,6 +108,47 @@ export default async function GatesPage({
         <span className="text-sm text-muted-foreground">Sort</span>
         <SortSelect value={sort} />
       </div>
+
+      <Card>
+        <CardContent className="flex flex-wrap items-center gap-4 py-4">
+          <div className="min-w-0 flex-1">
+            <p className="font-medium">🗝️ The Complete Vault</p>
+            <p className="text-sm text-muted-foreground">
+              {vault?.status === "published"
+                ? "Fans complete your follow steps once to download every track in your vault."
+                : "Bundle all your tracks behind one set of follow steps — fans unlock everything at once."}
+            </p>
+          </div>
+          {vault?.status === "published" ? (
+            <div className="flex gap-2">
+              <CopyUrlButton
+                url={`${siteUrl}/${profile?.artist_slug}/${vault.slug}`}
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                render={<Link href={`/dashboard/gates/${vault.id}/edit`} />}
+                nativeButton={false}
+              >
+                Customize
+              </Button>
+              <form action={setVaultEnabledAction}>
+                <input type="hidden" name="enabled" value="false" />
+                <Button size="sm" variant="ghost" type="submit">
+                  Disable
+                </Button>
+              </form>
+            </div>
+          ) : (
+            <form action={setVaultEnabledAction}>
+              <input type="hidden" name="enabled" value="true" />
+              <Button size="sm" type="submit">
+                Enable the Vault
+              </Button>
+            </form>
+          )}
+        </CardContent>
+      </Card>
 
       {!gates.length ? (
         <Card>

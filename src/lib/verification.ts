@@ -246,7 +246,7 @@ export async function runVerification(submissionId: string): Promise<void> {
   const { data: submission } = await admin
     .from("submissions")
     .select(
-      "id, gate_id, status, proof_code, email, fraud_flags, gates(creator_id, title, artist, soundcloud_url)"
+      "id, gate_id, status, proof_code, email, fraud_flags, gates(creator_id, title, artist, soundcloud_url, kind)"
     )
     .eq("id", submissionId)
     .maybeSingle()
@@ -257,6 +257,7 @@ export async function runVerification(submissionId: string): Promise<void> {
     title: string
     artist: string
     soundcloud_url: string
+    kind: string
   }
 
   const [{ data: req }, { data: targets }, { data: proofs }] =
@@ -409,7 +410,9 @@ export async function runVerification(submissionId: string): Promise<void> {
     })
   }
 
-  if (finalStatus === "approved" && submission.email) {
+  // Vault unlocks are delivered as an on-page list (many files), so skip the
+  // single-file download email.
+  if (finalStatus === "approved" && submission.email && gate.kind !== "vault") {
     try {
       const token = await mintDownloadToken(submissionId)
       await sendDownloadEmail({

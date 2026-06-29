@@ -67,12 +67,14 @@ export function UnlockPanel({
   requirements,
   track,
   tracking,
+  isVault = false,
 }: {
   gateId: string
   accent: string
   requirements: Requirements
   track: Track
   tracking: GateTracking
+  isVault?: boolean
 }) {
   const proofSteps = useMemo<ProofStep[]>(() => {
     const s: ProofStep[] = []
@@ -270,12 +272,20 @@ export function UnlockPanel({
         <CardContent className="space-y-2 py-5 text-center">
           <h2 className="font-semibold">You&apos;re in! 🎉</h2>
           <Button
-            render={<a href={`/download/by-status/${submission.statusToken}`} />}
+            render={
+              <a
+                href={
+                  isVault
+                    ? `/download/vault/${submission.statusToken}`
+                    : `/download/by-status/${submission.statusToken}`
+                }
+              />
+            }
             nativeButton={false}
             className="w-full"
             style={{ backgroundColor: accent }}
           >
-            Download the HQ file
+            {isVault ? "Get your downloads" : "Download the HQ file"}
           </Button>
         </CardContent>
       </Card>

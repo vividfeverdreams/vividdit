@@ -113,6 +113,79 @@ export async function redeemDownloadToken(raw: string): Promise<RedeemResult> {
   return signedUrlForSubmission(token.submission_id)
 }
 
+export type VaultFile = { title: string; filename: string; url: string }
+
+/**
+ * Vault delivery: given an approved vault submission's status token, returns a
+ * freshly-signed download link for every HQ file the creator has flagged into
+ * the vault (every published `in_vault` single gate). Returns null if the token
+ * isn't an approved vault submission.
+ */
+export async function getVaultDownloads(
+  statusToken: string
+): Promise<VaultFile[] | null> {
+  const admin = createAdminClient()
+
+  const { data: submission } = await admin
+    .from("submissions")
+    .select("id, gate_id, status, gates(creator_id, kind)")
+    .eq("status_token", statusToken)
+    .maybeSingle()
+  if (!submission || submission.status !== "approved") return null
+  const vaultGate = submission.gates as unknown as {
+    creator_id: string
+    kind: string
+  }
+  if (vaultGate.kind !== "vault") return null
+
+  const { data: gates } = await admin
+    .from("gates")
+    .select(
+      "title, created_at, download_assets(storage_path, filename, storage_provider)"
+    )
+    .eq("creator_id", vaultGate.creator_id)
+    .eq("kind", "single")
+    .eq("in_vault", true)
+    .eq("status", "published")
+    .order("created_at", { ascending: false })
+
+  const files: VaultFile[] = []
+  for (const g of gates ?? []) {
+    // download_assets is one-per-gate, so PostgREST may embed it as an object
+    // (to-one) or array depending on constraints — handle both.
+    const da = g.download_assets as unknown
+    const asset = (Array.isArray(da) ? da[0] : da) as
+      | { storage_path: string; filename: string; storage_provider: string }
+      | undefined
+    if (!asset) continue
+
+    let url: string | null = null
+    if (asset.storage_provider === "r2") {
+      url = await r2DownloadUrl(
+        vaultGate.creator_id,
+        asset.storage_path,
+        asset.filename
+      )
+    } else {
+      const { data: signed } = await admin.storage
+        .from("hq-files")
+        .createSignedUrl(asset.storage_path, SIGNED_URL_TTL_SECONDS, {
+          download: asset.filename,
+        })
+      url = signed?.signedUrl ?? null
+    }
+    if (url) files.push({ title: g.title, filename: asset.filename, url })
+  }
+
+  await admin.from("events").insert({
+    gate_id: submission.gate_id,
+    submission_id: submission.id,
+    event_type: "download",
+  })
+
+  return files
+}
+
 /** On-page path: the status token is the capability; cap total downloads. */
 export async function redeemByStatusToken(
   statusToken: string
