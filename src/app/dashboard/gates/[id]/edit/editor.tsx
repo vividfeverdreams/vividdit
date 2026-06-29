@@ -37,6 +37,7 @@ export function GateEditor({
   hasValidKey,
   isVault = false,
   vaultTracks = [],
+  ownProfiles = { soundcloud: null, instagram: null, spotify: null },
   initial,
 }: {
   gateId: string
@@ -47,6 +48,11 @@ export function GateEditor({
   hasValidKey: boolean
   isVault?: boolean
   vaultTracks?: VaultTrack[]
+  ownProfiles?: {
+    soundcloud: string | null
+    instagram: string | null
+    spotify: string | null
+  }
   initial: Initial
 }) {
   const router = useRouter()
@@ -224,18 +230,21 @@ export function GateEditor({
               urls={scFollows}
               onChange={setScFollows}
               placeholder="https://soundcloud.com/artist"
+              own={ownProfiles.soundcloud}
             />
             <FollowList
               label="Instagram profiles to follow"
               urls={igFollows}
               onChange={setIgFollows}
               placeholder="https://instagram.com/handle"
+              own={ownProfiles.instagram}
             />
             <FollowList
               label="Spotify profiles to follow"
               urls={spFollows}
               onChange={setSpFollows}
               placeholder="https://open.spotify.com/artist/…"
+              own={ownProfiles.spotify}
             />
           </div>
         </CardContent>

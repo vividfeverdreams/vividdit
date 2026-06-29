@@ -44,19 +44,25 @@ export default async function EditGatePage({
     inVault: t.in_vault,
   }))
 
-  const [{ data: req }, { data: targets }, validKey] = await Promise.all([
-    supabase
-      .from("gate_requirements")
-      .select("email_enabled, require_like, require_repost, require_proof_code")
-      .eq("gate_id", id)
-      .maybeSingle(),
-    supabase
-      .from("gate_follow_targets")
-      .select("platform, profile_url, sort_order")
-      .eq("gate_id", id)
-      .order("sort_order", { ascending: true }),
-    hasValidAiKey(user.id),
-  ])
+  const [{ data: req }, { data: targets }, { data: profile }, validKey] =
+    await Promise.all([
+      supabase
+        .from("gate_requirements")
+        .select("email_enabled, require_like, require_repost, require_proof_code")
+        .eq("gate_id", id)
+        .maybeSingle(),
+      supabase
+        .from("gate_follow_targets")
+        .select("platform, profile_url, sort_order")
+        .eq("gate_id", id)
+        .order("sort_order", { ascending: true }),
+      supabase
+        .from("profiles")
+        .select("soundcloud_profile_url, instagram_url, spotify_url")
+        .eq("id", user.id)
+        .single(),
+      hasValidAiKey(user.id),
+    ])
 
   const theme = (gate.theme ?? {}) as {
     accentColor?: string
@@ -81,6 +87,11 @@ export default async function EditGatePage({
       hasValidKey={validKey}
       isVault={isVault}
       vaultTracks={vaultTracks}
+      ownProfiles={{
+        soundcloud: profile?.soundcloud_profile_url ?? null,
+        instagram: profile?.instagram_url ?? null,
+        spotify: profile?.spotify_url ?? null,
+      }}
       initial={{
         accentColor: theme.accentColor ?? "#18181b",
         backgroundColor: theme.backgroundColor ?? "#0a0a0a",
