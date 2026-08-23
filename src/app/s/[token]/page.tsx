@@ -56,7 +56,7 @@ export default async function StatusPage({
   const { data: submission } = await admin
     .from("submissions")
     .select(
-      "id, status, proof_code, email, created_at, gates(title, artist, gate_requirements(require_proof_code, soundcloud_enabled))"
+      "id, status, proof_code, email, created_at, gates(title, artist, kind, gate_requirements(require_proof_code, soundcloud_enabled))"
     )
     .eq("status_token", token)
     .maybeSingle()
@@ -65,6 +65,7 @@ export default async function StatusPage({
   const gate = submission.gates as unknown as {
     title: string
     artist: string
+    kind: string
     gate_requirements: {
       require_proof_code: boolean
       soundcloud_enabled: boolean
@@ -74,6 +75,7 @@ export default async function StatusPage({
     !!gate.gate_requirements?.soundcloud_enabled &&
     !!gate.gate_requirements?.require_proof_code
   const copy = STATUS_COPY[submission.status] ?? STATUS_COPY.pending
+  const isVault = gate.kind === "vault"
 
   // Surface the AI's explanation so rejected fans know what to fix.
   let fanMessage: string | null = null
@@ -112,17 +114,29 @@ export default async function StatusPage({
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-2 text-sm text-muted-foreground">
-          <p>{copy.body}</p>
+          <p>
+            {submission.status === "approved" && isVault
+              ? "Your vault is unlocked — open it below to download any track."
+              : copy.body}
+          </p>
           {fanMessage && (
             <p className="rounded-lg border p-3 text-foreground">{fanMessage}</p>
           )}
           {submission.status === "approved" && (
             <Button
-              render={<a href={`/download/by-status/${token}`} />}
+              render={
+                <a
+                  href={
+                    isVault
+                      ? `/download/vault/${token}`
+                      : `/download/by-status/${token}`
+                  }
+                />
+              }
               nativeButton={false}
               className="w-full"
             >
-              Download the HQ file
+              {isVault ? "Open your vault" : "Download the HQ file"}
             </Button>
           )}
           {showProofCode && (

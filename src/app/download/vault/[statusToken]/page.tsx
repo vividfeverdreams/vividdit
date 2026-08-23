@@ -2,7 +2,10 @@ import Link from "next/link"
 
 import { getVaultDownloads } from "@/lib/downloads"
 
-export const metadata = { title: "Your vault downloads" }
+export const metadata = {
+  title: "Your vault downloads",
+  robots: { index: false, follow: false },
+}
 
 export default async function VaultDownloadPage({
   params,
@@ -11,9 +14,27 @@ export default async function VaultDownloadPage({
 }) {
   const { statusToken } = await params
 
-  const files = /^[0-9a-f-]{36}$/i.test(statusToken)
-    ? await getVaultDownloads(statusToken)
-    : null
+  let files = null
+  let signingFailed = false
+  if (/^[0-9a-f-]{36}$/i.test(statusToken)) {
+    try {
+      files = await getVaultDownloads(statusToken)
+    } catch (error) {
+      signingFailed = true
+      console.error("[vault-download] signing failed", error)
+    }
+  }
+
+  if (signingFailed) {
+    return (
+      <main className="mx-auto flex min-h-svh max-w-md flex-col items-center justify-center gap-3 px-4 text-center">
+        <h1 className="text-xl font-semibold">Vault temporarily unavailable</h1>
+        <p className="text-sm text-muted-foreground">
+          We couldn&apos;t prepare the file links. Refresh this page to try again.
+        </p>
+      </main>
+    )
+  }
 
   if (!files) {
     return (

@@ -3,7 +3,11 @@
 import { revalidatePath } from "next/cache"
 
 import { mintDownloadToken } from "@/lib/downloads"
-import { sendDownloadEmail, sendRejectionEmail } from "@/lib/email"
+import {
+  sendDownloadEmail,
+  sendRejectionEmail,
+  sendVaultDownloadEmail,
+} from "@/lib/email"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { createClient } from "@/lib/supabase/server"
 
@@ -19,7 +23,7 @@ async function loadOwnSubmission(submissionId: string) {
   const { data } = await supabase
     .from("submissions")
     .select(
-      "id, gate_id, status, email, gates(title, artist, slug, creator_id, profiles:profiles!gates_creator_id_fkey(artist_slug))"
+      "id, gate_id, status, status_token, email, gates(title, artist, slug, kind, creator_id, profiles:profiles!gates_creator_id_fkey(artist_slug))"
     )
     .eq("id", submissionId)
     .maybeSingle()
@@ -34,10 +38,14 @@ export async function approveSubmissionAction(formData: FormData) {
   if (!submission || submission.status !== "needs_review") return
 
   const supabase = await createClient()
-  await supabase
+  const { data: approved, error: approveError } = await supabase
     .from("submissions")
     .update({ status: "approved", decided_at: new Date().toISOString() })
     .eq("id", submissionId)
+    .eq("status", "needs_review")
+    .select("id")
+    .maybeSingle()
+  if (approveError || !approved) return
 
   const admin = createAdminClient()
   await admin.from("events").insert({
@@ -49,18 +57,29 @@ export async function approveSubmissionAction(formData: FormData) {
   const gate = submission.gates as unknown as {
     title: string
     artist: string
+    kind: string
     creator_id: string
   }
   if (submission.email) {
     try {
-      const token = await mintDownloadToken(submissionId)
-      await sendDownloadEmail({
-        creatorId: gate.creator_id,
-        to: submission.email,
-        gateTitle: gate.title,
-        artist: gate.artist,
-        downloadToken: token,
-      })
+      if (gate.kind === "vault") {
+        await sendVaultDownloadEmail({
+          creatorId: gate.creator_id,
+          to: submission.email,
+          gateTitle: gate.title,
+          artist: gate.artist,
+          statusToken: submission.status_token,
+        })
+      } else {
+        const token = await mintDownloadToken(submissionId)
+        await sendDownloadEmail({
+          creatorId: gate.creator_id,
+          to: submission.email,
+          gateTitle: gate.title,
+          artist: gate.artist,
+          downloadToken: token,
+        })
+      }
     } catch (err) {
       console.error("approval email failed:", err)
     }
@@ -77,10 +96,14 @@ export async function rejectSubmissionAction(formData: FormData) {
   if (!submission || submission.status !== "needs_review") return
 
   const supabase = await createClient()
-  await supabase
+  const { data: rejected, error: rejectError } = await supabase
     .from("submissions")
     .update({ status: "rejected", decided_at: new Date().toISOString() })
     .eq("id", submissionId)
+    .eq("status", "needs_review")
+    .select("id")
+    .maybeSingle()
+  if (rejectError || !rejected) return
 
   const admin = createAdminClient()
   await admin.from("events").insert({

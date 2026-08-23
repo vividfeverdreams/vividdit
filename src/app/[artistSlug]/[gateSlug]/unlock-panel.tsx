@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 
 import {
-  finalizeSubmissionAction,
   getSubmissionStatusAction,
   startSubmissionAction,
 } from "@/app/[artistSlug]/[gateSlug]/actions"
@@ -11,12 +10,18 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import {
+  ALLOWED_PROOF_TYPES,
+  MAX_PROOF_FILES,
+  proofBatchError,
+  proofFileError,
+} from "@/lib/proof-upload-contract"
+import {
+  ProofUploadClientError,
+  uploadProofFiles,
+} from "@/lib/proof-upload-client"
 import { fireDownloadConversion, type GateTracking } from "@/lib/tracking"
 import { cn } from "@/lib/utils"
-
-const MAX_BYTES = 10 * 1024 * 1024
-const MAX_BATCH = 10
-const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"]
 
 const PLATFORM_LABEL: Record<string, string> = {
   soundcloud: "SoundCloud",
@@ -54,13 +59,6 @@ type Submission = {
 
 type ProofStep = { kind: "track" } | { kind: "follow"; target: FollowTarget }
 
-function fileError(file: File): string | null {
-  if (!ALLOWED_TYPES.includes(file.type))
-    return "Screenshots must be JPG, PNG, or WEBP."
-  if (file.size > MAX_BYTES) return `${file.name} is over 10MB.`
-  return null
-}
-
 export function UnlockPanel({
   gateId,
   accent,
@@ -95,7 +93,7 @@ export function UnlockPanel({
   const [error, setError] = useState<string | null>(null)
   const [dragging, setDragging] = useState(false)
   const [outcome, setOutcome] = useState<
-    null | "verifying" | "approved" | "rejected" | "needs_review"
+    null | "verifying" | "stalled" | "approved" | "rejected" | "needs_review"
   >(null)
 
   useEffect(() => {
@@ -106,7 +104,7 @@ export function UnlockPanel({
     if (!list) return
     const valid: File[] = []
     for (const f of Array.from(list)) {
-      const err = fileError(f)
+      const err = proofFileError(f)
       if (err) {
         setError(err)
         continue
@@ -115,7 +113,7 @@ export function UnlockPanel({
     }
     if (valid.length) {
       setError(null)
-      setBatchFiles((prev) => [...prev, ...valid].slice(0, MAX_BATCH))
+      setBatchFiles((prev) => [...prev, ...valid].slice(0, MAX_PROOF_FILES))
     }
   }, [])
 
@@ -183,14 +181,23 @@ export function UnlockPanel({
   }
 
   const pollStatus = async (statusToken: string) => {
-    for (let i = 0; i < 16; i++) {
+    // Verification requests can legitimately run for up to 90 seconds. A
+    // transient polling failure should not strand the fan or mislabel the
+    // submission as needing review.
+    for (let i = 0; i < 144; i++) {
       await new Promise((r) => setTimeout(r, 2500))
-      const { status } = await getSubmissionStatusAction(statusToken)
-      if (status === "approved") return setOutcome("approved")
-      if (status === "rejected") return setOutcome("rejected")
-      if (status === "needs_review") return setOutcome("needs_review")
+      try {
+        const { status } = await getSubmissionStatusAction(statusToken)
+        if (status === "approved") return setOutcome("approved")
+        if (status === "rejected") return setOutcome("rejected")
+        if (status === "needs_review") return setOutcome("needs_review")
+      } catch {
+        // Continue polling; the status page link remains available below.
+      }
     }
-    setOutcome("needs_review")
+    // Keep the durable status page as the fallback after six minutes without
+    // claiming the persisted submission has entered manual review.
+    setOutcome("stalled")
   }
 
   const openProfile = (url: string) =>
@@ -224,6 +231,10 @@ export function UnlockPanel({
     if (hasProofs && batchFiles.length === 0) {
       return setError("Add a screenshot for each step above.")
     }
+    if (hasProofs) {
+      const validationError = proofBatchError(batchFiles)
+      if (validationError) return setError(validationError)
+    }
 
     setBusy(true)
     try {
@@ -231,23 +242,19 @@ export function UnlockPanel({
       if (!sub) return
       if (!hasProofs) return
 
-      const form = new FormData()
-      form.set("statusToken", sub.statusToken)
-      form.set("finalize", "false")
-      for (const f of batchFiles) form.append("proofs", f)
-      const res = await fetch(`/api/submissions/${sub.submissionId}/proofs`, {
-        method: "POST",
-        body: form,
+      await uploadProofFiles({
+        submissionId: sub.submissionId,
+        statusToken: sub.statusToken,
+        files: batchFiles,
       })
-      const body = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        setError(body.error ?? "Upload failed. Try again.")
-        return
-      }
-
-      await finalizeSubmissionAction(sub.statusToken)
       setOutcome("verifying")
-      pollStatus(sub.statusToken)
+      void pollStatus(sub.statusToken)
+    } catch (error) {
+      setError(
+        error instanceof ProofUploadClientError
+          ? error.message
+          : "Upload failed. Check your connection and try again."
+      )
     } finally {
       setBusy(false)
     }
@@ -262,6 +269,37 @@ export function UnlockPanel({
           <p className="text-sm text-muted-foreground">
             Usually under a minute — hang tight.
           </p>
+          {submission && (
+            <Button
+              render={<a href={`/s/${submission.statusToken}`} />}
+              nativeButton={false}
+              variant="outline"
+              className="mt-3 w-full"
+            >
+              Open status page
+            </Button>
+          )}
+        </CardContent>
+      </Card>
+    )
+  }
+  if (outcome === "stalled" && submission) {
+    return (
+      <Card>
+        <CardContent className="space-y-2 py-5 text-center">
+          <h2 className="font-semibold">Still checking your proof</h2>
+          <p className="text-sm text-muted-foreground">
+            This is taking longer than usual. Open your status page to keep
+            checking the result.
+          </p>
+          <Button
+            render={<a href={`/s/${submission.statusToken}`} />}
+            nativeButton={false}
+            variant="outline"
+            className="w-full"
+          >
+            Open status page
+          </Button>
         </CardContent>
       </Card>
     )
@@ -535,7 +573,7 @@ function BatchDrop({
         <span className="text-muted-foreground">or tap to choose</span>
         <input
           type="file"
-          accept={ALLOWED_TYPES.join(",")}
+          accept={ALLOWED_PROOF_TYPES.join(",")}
           multiple
           className="sr-only"
           onChange={(e) => onAdd(e.target.files)}

@@ -58,6 +58,27 @@ export async function sendDownloadEmail(opts: {
   })
 }
 
+export async function sendVaultDownloadEmail(opts: {
+  creatorId: string
+  to: string
+  gateTitle: string
+  artist: string
+  statusToken: string
+}): Promise<void> {
+  const base = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"
+  const url = `${base.replace(/\/$/, "")}/download/vault/${opts.statusToken}`
+  await sendAsCreator(opts.creatorId, {
+    to: opts.to,
+    subject: `Your vault is ready — ${opts.gateTitle}`,
+    html: `
+<p>Your proof was approved! 🎉</p>
+<p><strong>${opts.gateTitle}</strong> by ${opts.artist} is ready to download:</p>
+<p><a href="${url}" style="display:inline-block;padding:10px 18px;background:#18181b;color:#fafafa;border-radius:8px;text-decoration:none;">Open the vault</a></p>
+<p style="color:#71717a;font-size:13px;">The files use short-lived download URLs; reopen this vault page whenever you need fresh links. Sent via Vividdit on behalf of ${opts.artist}.</p>
+`.trim(),
+  })
+}
+
 export async function sendRejectionEmail(opts: {
   creatorId: string
   to: string

@@ -169,23 +169,25 @@ export async function finalizeSubmissionAction(
   const admin = createAdminClient()
   const { data: submission } = await admin
     .from("submissions")
-    .select("id, gate_id, status")
+    .select("id")
     .eq("status_token", statusToken)
     .maybeSingle()
-  if (!submission || !["pending", "rejected"].includes(submission.status)) {
+  if (!submission) return { ok: false }
+
+  const { data: claimed, error } = await admin.rpc(
+    "claim_submission_verification",
+    {
+      p_submission_id: submission.id,
+      p_status_token: statusToken,
+    }
+  )
+  if (error) {
+    console.error("[proof-upload] legacy finalize claim failed", error.message)
     return { ok: false }
   }
+  if (!claimed) return { ok: false }
 
-  await admin
-    .from("submissions")
-    .update({ status: "pending" })
-    .eq("id", submission.id)
-  await admin.from("events").insert({
-    gate_id: submission.gate_id,
-    submission_id: submission.id,
-    event_type: "submit",
-  })
-  after(() => runVerification(submission.id))
+  after(() => runVerification(submission.id, statusToken))
   return { ok: true }
 }
 
@@ -197,8 +199,18 @@ export async function getSubmissionStatusAction(
   const admin = createAdminClient()
   const { data } = await admin
     .from("submissions")
-    .select("status")
+    .select("id, status, verification_dispatched_at")
     .eq("status_token", statusToken)
     .maybeSingle()
+  if (
+    data?.status === "verifying" &&
+    (!data.verification_dispatched_at ||
+      new Date(data.verification_dispatched_at).getTime() <
+        Date.now() - 3 * 60 * 1000)
+  ) {
+    // Recover a worker that disappeared after claiming dispatch. The bounded
+    // database lease prevents overlapping paid verification work.
+    after(() => runVerification(data.id, statusToken))
+  }
   return { status: data?.status ?? null }
 }

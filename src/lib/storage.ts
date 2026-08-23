@@ -259,3 +259,22 @@ export async function r2DownloadUrl(
   if (!creds) return null
   return presignR2Download(creds, key, filename)
 }
+
+/**
+ * Vault delivery signs many objects at once. Fetch the creator's encrypted R2
+ * credentials once, then sign each object in memory instead of doing one DB
+ * credential lookup per track.
+ */
+export async function r2DownloadUrls(
+  creatorId: string,
+  objects: { key: string; filename: string }[]
+): Promise<string[]> {
+  if (objects.length === 0) return []
+  const creds = await getCreds(creatorId)
+  if (!creds) throw new Error("R2 credentials are unavailable")
+  return Promise.all(
+    objects.map(({ key, filename }) =>
+      presignR2Download(creds, key, filename)
+    )
+  )
+}

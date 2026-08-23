@@ -1,14 +1,16 @@
 import "server-only"
 
+import { randomUUID } from "node:crypto"
+
 import { getDecryptedAiKey } from "@/lib/ai-keys"
 import type { AiProvider } from "@/lib/ai-models"
 import { mintDownloadToken } from "@/lib/downloads"
-import { sendDownloadEmail } from "@/lib/email"
+import { sendDownloadEmail, sendVaultDownloadEmail } from "@/lib/email"
 import { createAdminClient } from "@/lib/supabase/admin"
 
-// AI screenshot verification. One call per submission; each required item
-// (the SoundCloud track actions, plus one per follow profile) maps to one
-// screenshot, and the model returns a confirmed/result per item in order.
+// AI screenshot verification. The dispatch lease admits one paid worker at a
+// time, and the model checks every required action against the full unordered
+// screenshot set.
 
 export type ItemResult = {
   label: string
@@ -240,17 +242,69 @@ async function requestVerification(opts: {
   return { text, usage: body.usage ?? {} }
 }
 
-export async function runVerification(submissionId: string): Promise<void> {
+export async function runVerification(
+  submissionId: string,
+  statusToken: string
+): Promise<void> {
   const admin = createAdminClient()
+  const dispatchToken = randomUUID()
+  let claimed = false
+
+  // Claim before any Storage reads or paid AI work. A retry uses the same
+  // caller-owned token, so a committed-but-lost RPC response is idempotent.
+  // A different callback cannot take over until the three-minute lease is
+  // older than the 90-second model timeout.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const { data, error } = await admin.rpc(
+      "claim_submission_verification_dispatch",
+      {
+        p_submission_id: submissionId,
+        p_status_token: statusToken,
+        p_dispatch_token: dispatchToken,
+      }
+    )
+    if (!error) {
+      claimed = data === true
+      break
+    }
+    if (attempt === 1) {
+      // If both RPC responses were lost after the database committed, prove
+      // ownership through the same submission capability before giving up.
+      const { data: persisted, error: readbackError } = await admin
+        .from("submissions")
+        .select("status, verification_dispatch_token")
+        .eq("id", submissionId)
+        .eq("status_token", statusToken)
+        .maybeSingle()
+      if (
+        !readbackError &&
+        persisted?.status === "verifying" &&
+        persisted.verification_dispatch_token === dispatchToken
+      ) {
+        claimed = true
+        break
+      }
+      console.error(
+        "verification dispatch claim failed:",
+        readbackError?.message ?? error.message
+      )
+      return
+    }
+  }
+  if (!claimed) return
 
   const { data: submission } = await admin
     .from("submissions")
     .select(
-      "id, gate_id, status, proof_code, email, fraud_flags, gates(creator_id, title, artist, soundcloud_url, kind)"
+      "id, gate_id, status, status_token, proof_code, email, fraud_flags, gates(creator_id, title, artist, soundcloud_url, kind)"
     )
     .eq("id", submissionId)
     .maybeSingle()
-  if (!submission || submission.status !== "pending") return
+  // Completion/finalization transitions the submission to verifying before
+  // scheduling this work. Recovery callbacks may race to this function, but
+  // the dispatch-token lease above admits only one paid worker at a time. The
+  // terminal compare-and-set below also gates user-visible events and delivery.
+  if (!submission || submission.status !== "verifying") return
 
   const gate = submission.gates as unknown as {
     creator_id: string
@@ -282,11 +336,6 @@ export async function runVerification(submissionId: string): Promise<void> {
   const trackActions = !!req && (req.require_like || req.require_repost)
   const followTargets = targets ?? []
   if ((!trackActions && followTargets.length === 0) || !proofs?.length) return
-
-  await admin
-    .from("submissions")
-    .update({ status: "verifying" })
-    .eq("id", submissionId)
 
   // The required actions, as a checklist. Each fan-uploaded screenshot is no
   // longer tagged to a specific requirement; instead the AI checks every
@@ -394,13 +443,25 @@ export async function runVerification(submissionId: string): Promise<void> {
     error,
   })
 
-  await admin
+  const { data: finalized, error: finalizeError } = await admin
     .from("submissions")
     .update({
       status: finalStatus,
       decided_at: finalStatus === "needs_review" ? null : new Date().toISOString(),
     })
     .eq("id", submissionId)
+    .eq("status", "verifying")
+    .select("id")
+    .maybeSingle()
+
+  if (finalizeError) {
+    console.error("verification finalization failed:", finalizeError.message)
+    return
+  }
+  // A creator decision, cleanup recovery, or another claimed worker may have
+  // moved the row while the AI request was running. Only the worker that wins
+  // the verifying -> terminal compare-and-set may emit events or deliver mail.
+  if (!finalized) return
 
   if (finalStatus !== "needs_review") {
     await admin.from("events").insert({
@@ -410,18 +471,26 @@ export async function runVerification(submissionId: string): Promise<void> {
     })
   }
 
-  // Vault unlocks are delivered as an on-page list (many files), so skip the
-  // single-file download email.
-  if (finalStatus === "approved" && submission.email && gate.kind !== "vault") {
+  if (finalStatus === "approved" && submission.email) {
     try {
-      const token = await mintDownloadToken(submissionId)
-      await sendDownloadEmail({
-        creatorId: gate.creator_id,
-        to: submission.email,
-        gateTitle: gate.title,
-        artist: gate.artist,
-        downloadToken: token,
-      })
+      if (gate.kind === "vault") {
+        await sendVaultDownloadEmail({
+          creatorId: gate.creator_id,
+          to: submission.email,
+          gateTitle: gate.title,
+          artist: gate.artist,
+          statusToken: submission.status_token,
+        })
+      } else {
+        const token = await mintDownloadToken(submissionId)
+        await sendDownloadEmail({
+          creatorId: gate.creator_id,
+          to: submission.email,
+          gateTitle: gate.title,
+          artist: gate.artist,
+          downloadToken: token,
+        })
+      }
     } catch (err) {
       console.error("download email failed:", err)
     }

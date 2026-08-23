@@ -7,10 +7,16 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import {
+  ALLOWED_PROOF_TYPES,
+  proofBatchError,
+} from "@/lib/proof-upload-contract"
+import {
+  ProofUploadClientError,
+  uploadProofFiles,
+} from "@/lib/proof-upload-client"
 
 const MAX_FILES = 5
-const MAX_BYTES = 10 * 1024 * 1024
-const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"]
 
 export function ResubmitForm({
   submissionId,
@@ -27,19 +33,10 @@ export function ResubmitForm({
   const onPick = (list: FileList | null) => {
     setError(null)
     const picked = [...(list ?? [])]
-    if (picked.length > MAX_FILES) {
-      setError(`Up to ${MAX_FILES} screenshots.`)
+    const validationError = proofBatchError(picked, MAX_FILES)
+    if (validationError) {
+      setError(validationError)
       return
-    }
-    for (const f of picked) {
-      if (!ALLOWED_TYPES.includes(f.type)) {
-        setError("Screenshots must be JPG, PNG, or WEBP.")
-        return
-      }
-      if (f.size > MAX_BYTES) {
-        setError(`${f.name} is over 10MB.`)
-        return
-      }
     }
     setFiles(picked)
   }
@@ -49,21 +46,18 @@ export function ResubmitForm({
     setError(null)
     setUploading(true)
     try {
-      const form = new FormData()
-      form.set("statusToken", statusToken)
-      files.forEach((f) => form.append("proofs", f))
-      const res = await fetch(`/api/submissions/${submissionId}/proofs`, {
-        method: "POST",
-        body: form,
+      await uploadProofFiles({
+        submissionId,
+        statusToken,
+        files,
       })
-      const body = await res.json()
-      if (!res.ok) {
-        setError(body.error ?? "Upload failed. Try again.")
-        return
-      }
       router.refresh()
-    } catch {
-      setError("Upload failed. Check your connection and try again.")
+    } catch (error) {
+      setError(
+        error instanceof ProofUploadClientError
+          ? error.message
+          : "Upload failed. Check your connection and try again."
+      )
     } finally {
       setUploading(false)
     }
@@ -82,7 +76,7 @@ export function ResubmitForm({
           id="resubmitFiles"
           type="file"
           multiple
-          accept={ALLOWED_TYPES.join(",")}
+          accept={ALLOWED_PROOF_TYPES.join(",")}
           onChange={(e) => onPick(e.target.files)}
         />
       </div>

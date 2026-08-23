@@ -27,11 +27,15 @@ export async function setVaultEnabledAction(formData: FormData) {
 
   if (!enabled) {
     if (vault) {
-      await supabase
-        .from("gates")
-        .update({ status: "archived" })
-        .eq("id", vault.id)
-        .eq("creator_id", user.id)
+      // The RPC shares a transaction-scoped advisory lock with rescue-link
+      // mint/rotate, preventing a capability from appearing after disable.
+      const { error } = await supabase.rpc("disable_vault", {
+        p_vault_id: vault.id,
+      })
+      if (error) {
+        console.error("[vault] disable failed", { code: error.code })
+        throw new Error("Couldn't disable the vault. Try again.")
+      }
     }
     revalidatePath("/dashboard")
     return

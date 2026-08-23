@@ -2,10 +2,15 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 
 import {
+  getVaultDownloads,
   mintDownloadToken,
   redeemByStatusToken,
   redeemDownloadToken,
 } from "@/lib/downloads"
+import {
+  VAULT_RESCUE_PROOF_CODE,
+  VAULT_RESCUE_USER_AGENT,
+} from "@/lib/vault-rescue-constants"
 
 // Download delivery against the local stack: token redemption, expiry,
 // use limits, signed URLs, and the private-bucket guarantee.
@@ -37,6 +42,9 @@ describe.skipIf(!run)("download delivery", () => {
   let userId: string
   let submissionId: string
   let statusToken: string
+  let vaultGateId: string
+  let vaultStatusToken: string
+  let rescueStatusToken: string
 
   beforeAll(async () => {
     admin = createClient(url(), serviceKey())
@@ -84,6 +92,46 @@ describe.skipIf(!run)("download delivery", () => {
       .single()
     submissionId = sub!.id
     statusToken = sub!.status_token
+
+    const { data: vault } = await admin
+      .from("gates")
+      .insert({
+        creator_id: userId,
+        kind: "vault",
+        title: "DL Test Vault",
+        artist: "A",
+        soundcloud_url: "https://soundcloud.com/a",
+        slug: `vault-${suffix}`,
+        status: "published",
+      })
+      .select("id")
+      .single()
+    vaultGateId = vault!.id
+
+    const { data: vaultSub } = await admin
+      .from("submissions")
+      .insert({
+        gate_id: vaultGateId,
+        proof_code: "GATE-VAULT",
+        status: "approved",
+        decided_at: new Date().toISOString(),
+      })
+      .select("status_token")
+      .single()
+    vaultStatusToken = vaultSub!.status_token
+
+    const { data: rescueSub } = await admin
+      .from("submissions")
+      .insert({
+        gate_id: vaultGateId,
+        proof_code: VAULT_RESCUE_PROOF_CODE,
+        status: "approved",
+        user_agent: VAULT_RESCUE_USER_AGENT,
+        decided_at: new Date().toISOString(),
+      })
+      .select("status_token")
+      .single()
+    rescueStatusToken = rescueSub!.status_token
   })
 
   afterAll(async () => {
@@ -155,5 +203,36 @@ describe.skipIf(!run)("download delivery", () => {
       .from("submissions")
       .update({ status: "approved" })
       .eq("id", submissionId)
+  })
+
+  it("an approved vault token returns every included file", async () => {
+    const files = await getVaultDownloads(vaultStatusToken)
+    expect(files).toHaveLength(1)
+    expect(files?.[0].filename).toBe("track.wav")
+    const res = await fetch(files![0].url)
+    expect(res.status).toBe(200)
+    expect(await res.text()).toBe(fileBytes.toString())
+  })
+
+  it("rescue-link page loads do not inflate fan download analytics", async () => {
+    const before = await admin
+      .from("events")
+      .select("id", { count: "exact", head: true })
+      .eq("gate_id", vaultGateId)
+      .eq("event_type", "download")
+    expect(await getVaultDownloads(rescueStatusToken)).toHaveLength(1)
+    const after = await admin
+      .from("events")
+      .select("id", { count: "exact", head: true })
+      .eq("gate_id", vaultGateId)
+      .eq("event_type", "download")
+    expect(after.count).toBe(before.count)
+  })
+
+  it("vault links stop working when the artist disables the vault", async () => {
+    await admin.from("gates").update({ status: "archived" }).eq("id", vaultGateId)
+    expect(await getVaultDownloads(vaultStatusToken)).toBeNull()
+    expect(await getVaultDownloads(rescueStatusToken)).toBeNull()
+    await admin.from("gates").update({ status: "published" }).eq("id", vaultGateId)
   })
 })

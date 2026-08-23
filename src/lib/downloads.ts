@@ -3,7 +3,11 @@ import "server-only"
 import { createHash, randomBytes } from "node:crypto"
 
 import { createAdminClient } from "@/lib/supabase/admin"
-import { r2DownloadUrl } from "@/lib/storage"
+import { r2DownloadUrl, r2DownloadUrls } from "@/lib/storage"
+import {
+  VAULT_RESCUE_PROOF_CODE,
+  VAULT_RESCUE_USER_AGENT,
+} from "@/lib/vault-rescue-constants"
 
 // Download delivery. Two paths:
 //  - On-page: the fan holds their submission's status_token; a route swaps it
@@ -126,19 +130,25 @@ export async function getVaultDownloads(
 ): Promise<VaultFile[] | null> {
   const admin = createAdminClient()
 
-  const { data: submission } = await admin
+  const { data: submission, error: submissionError } = await admin
     .from("submissions")
-    .select("id, gate_id, status, gates(creator_id, kind)")
+    .select(
+      "id, gate_id, status, proof_code, user_agent, gates(creator_id, kind, status)"
+    )
     .eq("status_token", statusToken)
     .maybeSingle()
+  if (submissionError) {
+    throw new Error(`Couldn't load the vault grant: ${submissionError.message}`)
+  }
   if (!submission || submission.status !== "approved") return null
   const vaultGate = submission.gates as unknown as {
     creator_id: string
     kind: string
+    status: string
   }
-  if (vaultGate.kind !== "vault") return null
+  if (vaultGate.kind !== "vault" || vaultGate.status !== "published") return null
 
-  const { data: gates } = await admin
+  const { data: gates, error: gatesError } = await admin
     .from("gates")
     .select(
       "title, created_at, download_assets(storage_path, filename, storage_provider)"
@@ -148,8 +158,16 @@ export async function getVaultDownloads(
     .eq("in_vault", true)
     .eq("status", "published")
     .order("created_at", { ascending: false })
+  if (gatesError) {
+    throw new Error(`Couldn't load the vault files: ${gatesError.message}`)
+  }
 
-  const files: VaultFile[] = []
+  const assets: {
+    title: string
+    filename: string
+    storagePath: string
+    storageProvider: string
+  }[] = []
   for (const g of gates ?? []) {
     // download_assets is one-per-gate, so PostgREST may embed it as an object
     // (to-one) or array depending on constraints — handle both.
@@ -158,30 +176,90 @@ export async function getVaultDownloads(
       | { storage_path: string; filename: string; storage_provider: string }
       | undefined
     if (!asset) continue
-
-    let url: string | null = null
-    if (asset.storage_provider === "r2") {
-      url = await r2DownloadUrl(
-        vaultGate.creator_id,
-        asset.storage_path,
-        asset.filename
-      )
-    } else {
-      const { data: signed } = await admin.storage
-        .from("hq-files")
-        .createSignedUrl(asset.storage_path, SIGNED_URL_TTL_SECONDS, {
-          download: asset.filename,
-        })
-      url = signed?.signedUrl ?? null
-    }
-    if (url) files.push({ title: g.title, filename: asset.filename, url })
+    assets.push({
+      title: g.title,
+      filename: asset.filename,
+      storagePath: asset.storage_path,
+      storageProvider: asset.storage_provider,
+    })
   }
 
-  await admin.from("events").insert({
-    gate_id: submission.gate_id,
-    submission_id: submission.id,
-    event_type: "download",
-  })
+  const urls: (string | null)[] = assets.map(() => null)
+  const r2Indexes = assets.flatMap((asset, index) =>
+    asset.storageProvider === "r2" ? [index] : []
+  )
+  const supabaseIndexes = assets.flatMap((asset, index) =>
+    asset.storageProvider === "r2" ? [] : [index]
+  )
+
+  await Promise.all([
+    r2DownloadUrls(
+      vaultGate.creator_id,
+      r2Indexes.map((index) => ({
+        key: assets[index].storagePath,
+        filename: assets[index].filename,
+      }))
+    ).then((signed) => {
+      signed.forEach((url, i) => {
+        urls[r2Indexes[i]] = url
+      })
+    }),
+    (async () => {
+      if (supabaseIndexes.length === 0) return
+      const { data: signed, error: signError } = await admin.storage
+        .from("hq-files")
+        .createSignedUrls(
+          supabaseIndexes.map((index) => assets[index].storagePath),
+          SIGNED_URL_TTL_SECONDS
+        )
+      if (signError || !signed) {
+        throw new Error(
+          `Couldn't sign vault files: ${signError?.message ?? "empty response"}`
+        )
+      }
+      const indexByPath = new Map(
+        supabaseIndexes.map((index) => [assets[index].storagePath, index])
+      )
+      signed.forEach((item) => {
+        if (item.error || !item.signedUrl || !item.path) {
+          throw new Error(
+            `Couldn't sign vault file: ${item.error ?? item.path ?? "unknown path"}`
+          )
+        }
+        const index = indexByPath.get(item.path)
+        if (index === undefined) {
+          throw new Error(`Storage returned an unexpected vault path: ${item.path}`)
+        }
+        const separator = item.signedUrl.includes("?") ? "&" : "?"
+        urls[index] = `${item.signedUrl}${separator}download=${encodeURIComponent(
+          assets[index].filename
+        )}`
+      })
+    })(),
+  ])
+
+  if (urls.some((url) => !url)) {
+    throw new Error("Couldn't sign every vault file")
+  }
+
+  const files = assets.flatMap((asset, index) =>
+    urls[index]
+      ? [{ title: asset.title, filename: asset.filename, url: urls[index] }]
+      : []
+  ) as VaultFile[]
+
+  // Rescue links are operational fallbacks, not fan conversions. Counting
+  // their page loads would inflate the artist's download analytics.
+  const isRescue =
+    submission.proof_code === VAULT_RESCUE_PROOF_CODE &&
+    submission.user_agent === VAULT_RESCUE_USER_AGENT
+  if (!isRescue && files.length > 0) {
+    await admin.from("events").insert({
+      gate_id: submission.gate_id,
+      submission_id: submission.id,
+      event_type: "download",
+    })
+  }
 
   return files
 }

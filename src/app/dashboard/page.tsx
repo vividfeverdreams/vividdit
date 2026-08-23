@@ -4,6 +4,7 @@ import { publishGate, setGateArchived } from "@/app/dashboard/actions"
 import { setVaultEnabledAction } from "@/app/dashboard/vault-actions"
 import { CopyUrlButton } from "@/app/dashboard/copy-url-button"
 import { SortSelect } from "@/app/dashboard/sort-select"
+import { VaultRescueLink } from "@/app/dashboard/vault-rescue-link"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -13,6 +14,10 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { createClient } from "@/lib/supabase/server"
+import {
+  VAULT_RESCUE_PROOF_CODE,
+  VAULT_RESCUE_USER_AGENT,
+} from "@/lib/vault-rescue-constants"
 
 export const metadata = { title: "Download Gates" }
 
@@ -79,6 +84,27 @@ export default async function GatesPage({
   const vault = all.find((g) => g.kind === "vault") ?? null
   const singles = all.filter((g) => g.kind === "single")
 
+  const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL ?? "https://vividdit.com").replace(
+    /\/$/,
+    ""
+  )
+  let vaultRescueUrl: string | null = null
+  if (vault?.status === "published") {
+    const { data: rescue } = await supabase
+      .from("submissions")
+      .select("status_token")
+      .eq("gate_id", vault.id)
+      .eq("status", "approved")
+      .eq("proof_code", VAULT_RESCUE_PROOF_CODE)
+      .eq("user_agent", VAULT_RESCUE_USER_AGENT)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (rescue) {
+      vaultRescueUrl = `${siteUrl}/download/vault/${rescue.status_token}`
+    }
+  }
+
   // "archived" is a filter; the rest are sorts over non-archived gates.
   const gates =
     sort === "archived"
@@ -92,8 +118,6 @@ export default async function GatesPage({
     const tb = new Date(b.created_at).getTime()
     return sort === "oldest" ? ta - tb : tb - ta
   })
-
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "https://vividdit.com"
 
   return (
     <div className="space-y-6">
@@ -110,42 +134,61 @@ export default async function GatesPage({
       </div>
 
       <Card>
-        <CardContent className="flex flex-wrap items-center gap-4 py-4">
-          <div className="min-w-0 flex-1">
-            <p className="font-medium">🗝️ The Complete Vault</p>
-            <p className="text-sm text-muted-foreground">
-              {vault?.status === "published"
-                ? "Fans complete your follow steps once to download every track in your vault."
-                : "Bundle all your tracks behind one set of follow steps — fans unlock everything at once."}
-            </p>
-          </div>
-          {vault?.status === "published" ? (
-            <div className="flex gap-2">
-              <CopyUrlButton
-                url={`${siteUrl}/${profile?.artist_slug}/${vault.slug}`}
-              />
-              <Button
-                size="sm"
-                variant="outline"
-                render={<Link href={`/dashboard/gates/${vault.id}/edit`} />}
-                nativeButton={false}
-              >
-                Customize
-              </Button>
+        <CardContent className="space-y-3 py-4">
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="min-w-0 flex-1">
+              <p className="font-medium">🗝️ The Complete Vault</p>
+              <p className="text-sm text-muted-foreground">
+                {vault?.status === "published"
+                  ? "Fans complete your follow steps once to download every track in your vault."
+                  : "Bundle all your tracks behind one set of follow steps — fans unlock everything at once."}
+              </p>
+            </div>
+            {vault?.status === "published" ? (
+              <div className="flex gap-2">
+                <CopyUrlButton
+                  url={`${siteUrl}/${profile?.artist_slug}/${vault.slug}`}
+                />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  render={<Link href={`/dashboard/gates/${vault.id}/edit`} />}
+                  nativeButton={false}
+                >
+                  Customize
+                </Button>
+                <form action={setVaultEnabledAction}>
+                  <input type="hidden" name="enabled" value="false" />
+                  <Button size="sm" variant="ghost" type="submit">
+                    Disable
+                  </Button>
+                </form>
+              </div>
+            ) : (
               <form action={setVaultEnabledAction}>
-                <input type="hidden" name="enabled" value="false" />
-                <Button size="sm" variant="ghost" type="submit">
-                  Disable
+                <input type="hidden" name="enabled" value="true" />
+                <Button size="sm" type="submit">
+                  Enable the Vault
                 </Button>
               </form>
+            )}
+          </div>
+          {vault?.status === "published" && (
+            <div className="space-y-2 border-t pt-3">
+              <div>
+                <p className="text-sm font-medium">Having upload trouble?</p>
+                <p className="text-xs text-muted-foreground">
+                  Send this unlocked rescue link after a fan reports an error.
+                  Anyone with it can download the vault, so rotate it if it is
+                  shared too widely. Previously opened file links can take up
+                  to five minutes to expire.
+                </p>
+              </div>
+              <VaultRescueLink
+                vaultId={vault.id}
+                initialUrl={vaultRescueUrl}
+              />
             </div>
-          ) : (
-            <form action={setVaultEnabledAction}>
-              <input type="hidden" name="enabled" value="true" />
-              <Button size="sm" type="submit">
-                Enable the Vault
-              </Button>
-            </form>
           )}
         </CardContent>
       </Card>
