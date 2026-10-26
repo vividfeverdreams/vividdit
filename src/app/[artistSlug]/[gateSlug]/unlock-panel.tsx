@@ -127,6 +127,10 @@ function storageKey(gateId: string) {
   return `vividdit:gate:${gateId}`
 }
 
+function hideStyleId(gateId: string) {
+  return `vividdit-restoring-${gateId}`
+}
+
 function loadProgress(gateId: string): Progress | null {
   try {
     const raw = localStorage.getItem(storageKey(gateId))
@@ -213,9 +217,6 @@ export function UnlockPanel({
   const [opened, setOpened] = useState<string[]>([])
   const [userAgent, setUserAgent] = useState("")
   const [copied, setCopied] = useState(false)
-  // Hidden until saved progress is restored, so a returning fan doesn't see
-  // the email step flash before their real step.
-  const [ready, setReady] = useState(false)
 
   const progressRef = useRef(progress)
   const startRef = useRef<Promise<string | null> | null>(null)
@@ -270,7 +271,7 @@ export function UnlockPanel({
       setEmailInput(saved.email)
     }
     restoredRef.current = true
-    setReady(true)
+    document.getElementById(hideStyleId(gateId))?.remove()
     sendGateEvent({ gateId, type: "view", statusToken: saved?.statusToken })
 
     if (saved?.statusToken) {
@@ -533,9 +534,18 @@ export function UnlockPanel({
   return (
     <section
       aria-label="Unlock the download"
+      data-gate={gateId}
       style={vars}
       className="rounded-2xl border border-[var(--g-line)] bg-[var(--g-card)] p-4 text-[var(--g-fg)] shadow-sm sm:p-5"
     >
+      {/* A first-time fan sees the email step straight from the server HTML.
+          Only a fan with saved progress gets the steps hidden until the page
+          restores it, so their real step doesn't flash in after the email one. */}
+      <script
+        dangerouslySetInnerHTML={{
+          __html: `try{if(localStorage.getItem(${JSON.stringify(storageKey(gateId))})){var s=document.createElement("style");s.id=${JSON.stringify(hideStyleId(gateId))};s.textContent=${JSON.stringify(`[data-gate="${gateId}"] [aria-live]{visibility:hidden}`)};document.head.appendChild(s);setTimeout(function(){s.remove()},4000)}}catch(e){}`,
+        }}
+      />
       {screens.length > 1 && (
         <div className="mb-4">
           <div className="flex items-center justify-between text-[13px] text-[var(--g-muted)]">
@@ -562,13 +572,7 @@ export function UnlockPanel({
         </div>
       )}
 
-      <div
-        aria-live="polite"
-        className={cn(
-          "transition-opacity duration-150 motion-reduce:transition-none",
-          ready ? "opacity-100" : "opacity-0"
-        )}
-      >
+      <div aria-live="polite">
         {screen === "email" && (
           <form onSubmit={submitEmail} noValidate className="space-y-3">
             <h2
