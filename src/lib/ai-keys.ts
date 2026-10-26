@@ -121,83 +121,118 @@ export async function setVerificationModel(creatorId: string, model: string) {
 /** Decrypts the creator's key. Server-side verification/test use only. */
 export async function getDecryptedAiKey(
   creatorId: string
-): Promise<{ key: string; model: string; provider: AiProvider } | null> {
+): Promise<{ id: string; key: string; model: string; provider: AiProvider } | null> {
   const admin = createAdminClient()
   const { data } = await admin
     .from("creator_ai_keys")
-    .select("encrypted_key, model, provider")
+    .select("id, encrypted_key, model, provider")
     .eq("creator_id", creatorId)
     .maybeSingle()
   if (!data) return null
   return {
+    id: data.id,
     key: decryptSecret(data.encrypted_key),
     model: data.model,
     provider: (data.provider as AiProvider) ?? "openai",
   }
 }
 
+function outOfCredits(provider: AiProvider): string {
+  return provider === "openrouter"
+    ? "Out of credits. Add credits at openrouter.ai/settings/credits."
+    : "Out of credits. Add credits at platform.openai.com/settings/organization/billing."
+}
+
 async function validateOpenAiKey(
   key: string,
   model: string
 ): Promise<{ ok: boolean; error: string | null }> {
-  // Retrieving the configured model validates both the key and that the key's
-  // project has access to that model — without spending tokens.
-  const res = await fetch(
-    `https://api.openai.com/v1/models/${encodeURIComponent(model)}`,
-    {
-      headers: { Authorization: `Bearer ${key}` },
-      signal: AbortSignal.timeout(15_000),
-    }
-  )
+  // A tiny real request (a fraction of a cent). Retrieving the model alone
+  // passes even when the account has no credits left.
+  const res = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ model, input: "Reply with OK.", max_output_tokens: 16 }),
+    signal: AbortSignal.timeout(20_000),
+  })
   if (res.ok) return { ok: true, error: null }
   const body = (await res.json().catch(() => null)) as {
-    error?: { message?: string }
+    error?: { message?: string; code?: string; type?: string }
   } | null
-  let error = body?.error?.message ?? `OpenAI returned HTTP ${res.status}`
-  if (res.status === 404) {
-    error = `Key works, but model "${model}" is not available to it: ${error}`
+  const message = body?.error?.message ?? `OpenAI returned HTTP ${res.status}`
+  if (
+    body?.error?.type === "insufficient_quota" ||
+    body?.error?.code === "insufficient_quota" ||
+    isOutOfCredits(message)
+  ) {
+    return { ok: false, error: outOfCredits("openai") }
   }
-  return { ok: false, error }
+  // A plain rate limit means the key itself works.
+  if (res.status === 429) return { ok: true, error: null }
+  if (res.status === 404) {
+    return {
+      ok: false,
+      error: `Key works, but model "${model}" is not available to it: ${message}`,
+    }
+  }
+  return { ok: false, error: message }
 }
 
 async function validateOpenRouterKey(
   key: string,
   model: string
 ): Promise<{ ok: boolean; error: string | null }> {
-  // Validate the key itself (zero-cost): /api/v1/key returns key metadata.
-  const keyRes = await fetch("https://openrouter.ai/api/v1/key", {
-    headers: { Authorization: `Bearer ${key}` },
-    signal: AbortSignal.timeout(15_000),
+  // A one-token completion checks the key, the model and the credit balance.
+  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+      "HTTP-Referer": "https://vividdit.com",
+      "X-Title": "Vividdit",
+    },
+    body: JSON.stringify({
+      model,
+      messages: [{ role: "user", content: "Reply with OK." }],
+      max_tokens: 1,
+    }),
+    signal: AbortSignal.timeout(20_000),
   })
-  if (!keyRes.ok) {
-    const body = (await keyRes.json().catch(() => null)) as {
-      error?: { message?: string }
-    } | null
+  if (res.ok) return { ok: true, error: null }
+  const body = (await res.json().catch(() => null)) as {
+    error?: { message?: string }
+  } | null
+  const message = body?.error?.message ?? `OpenRouter returned HTTP ${res.status}`
+  if (res.status === 402 || isOutOfCredits(message)) {
+    return { ok: false, error: outOfCredits("openrouter") }
+  }
+  if (res.status === 429) return { ok: true, error: null }
+  if (res.status === 400 || res.status === 404) {
     return {
       ok: false,
-      error: body?.error?.message ?? `OpenRouter returned HTTP ${keyRes.status}`,
+      error: `Key works, but model "${model}" was not accepted: ${message}. Use a model id from openrouter.ai/models.`,
     }
   }
+  return { ok: false, error: message }
+}
 
-  // Key is valid — confirm the chosen model exists on OpenRouter (public list).
-  try {
-    const modelsRes = await fetch("https://openrouter.ai/api/v1/models", {
-      signal: AbortSignal.timeout(15_000),
-    })
-    if (modelsRes.ok) {
-      const body = (await modelsRes.json()) as { data?: { id?: string }[] }
-      const known = (body.data ?? []).some((m) => m.id === model)
-      if (!known) {
-        return {
-          ok: false,
-          error: `Key works, but model "${model}" was not found on OpenRouter. Use a model id from openrouter.ai/models.`,
-        }
-      }
-    }
-  } catch {
-    // Couldn't fetch the model list — don't fail the key on that alone.
-  }
-  return { ok: true, error: null }
+/** Provider errors that mean the key itself needs fixing, not a retry. */
+export function isOutOfCredits(message: string): boolean {
+  return /insufficient_quota|no credits|credits remaining|exceeded your current quota|insufficient credits|billing/i.test(
+    message
+  )
+}
+
+export function isKeyProblem(message: string): boolean {
+  return (
+    isOutOfCredits(message) ||
+    /invalid api key|incorrect api key|invalid_api_key|api key.*(revoked|disabled|not found)|unauthorized|no auth credentials|payment required|account.*deactivated/i.test(
+      message
+    )
+  )
 }
 
 /**
@@ -208,7 +243,7 @@ export async function testAiKey(creatorId: string): Promise<AiKeyInfo | null> {
   const stored = await getDecryptedAiKey(creatorId)
   if (!stored) return null
 
-  let keyStatus: "valid" | "invalid" = "invalid"
+  let keyStatus: "valid" | "invalid" | null = null
   let lastError: string | null = null
 
   try {
@@ -219,6 +254,8 @@ export async function testAiKey(creatorId: string): Promise<AiKeyInfo | null> {
     keyStatus = result.ok ? "valid" : "invalid"
     lastError = result.error
   } catch (err) {
+    // The provider couldn't be reached: report it, but keep the last known
+    // status rather than calling a working key broken.
     const name = stored.provider === "openrouter" ? "OpenRouter" : "OpenAI"
     lastError =
       err instanceof Error && err.name === "TimeoutError"
@@ -229,11 +266,14 @@ export async function testAiKey(creatorId: string): Promise<AiKeyInfo | null> {
   await admin
     .from("creator_ai_keys")
     .update({
-      key_status: keyStatus,
+      ...(keyStatus ? { key_status: keyStatus } : {}),
+      // A fixed key re-arms the "your key stopped working" email.
+      ...(keyStatus === "valid" ? { alerted_at: null } : {}),
       last_tested_at: new Date().toISOString(),
       last_error: lastError,
     })
-    .eq("creator_id", creatorId)
+    // The tested key only: the creator may have replaced it meanwhile.
+    .eq("id", stored.id)
 
   return getAiKeyInfo(creatorId)
 }

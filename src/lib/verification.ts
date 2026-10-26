@@ -2,15 +2,19 @@ import "server-only"
 
 import { randomUUID } from "node:crypto"
 
-import { getDecryptedAiKey } from "@/lib/ai-keys"
+import { getDecryptedAiKey, isKeyProblem } from "@/lib/ai-keys"
 import type { AiProvider } from "@/lib/ai-models"
-import { mintDownloadToken } from "@/lib/downloads"
-import { sendDownloadEmail, sendVaultDownloadEmail } from "@/lib/email"
+import { sendReviewNeededEmail } from "@/lib/email"
+import { markAiKeyBroken } from "@/lib/key-health"
+import { reviewUrl } from "@/lib/review-links"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { completeApproval } from "@/lib/unlock"
 
-// AI screenshot verification. The dispatch lease admits one paid worker at a
-// time, and the model checks every required action against the full unordered
-// screenshot set.
+// AI screenshot verification for Verified gates. The fan already has the
+// download by the time this runs (they unlock as soon as their screenshots are
+// in); the check decides whether that stands. The dispatch lease admits one
+// paid worker at a time, and the model checks every required action against
+// the full unordered screenshot set.
 
 export type ItemResult = {
   label: string
@@ -65,31 +69,32 @@ type Requirement = {
   requirement: string
 }
 
+// Fails open: when the AI couldn't run at all (no key, no credits, provider
+// down) the fan is approved and the submission is flagged for a later look.
+// Repeat-email / repeat-network flags are notes for the creator, never a veto;
+// an exact duplicate screenshot is already refused at upload.
 export function decideFinalStatus(
   outcome: VerificationOutcome | null,
-  expectedCount: number,
-  fraudFlags: string[]
+  expectedCount: number
 ): "approved" | "rejected" | "needs_review" {
-  if (!outcome || outcome.results.length !== expectedCount || expectedCount === 0) {
+  if (!outcome) return "approved"
+  if (outcome.results.length !== expectedCount || expectedCount === 0) {
     return "needs_review"
   }
 
   const allConfirmed = outcome.results.every((r) => r.confirmed)
   const noneConfirmed = outcome.results.every((r) => !r.confirmed)
 
-  let status: "approved" | "rejected" | "needs_review" = "needs_review"
   if (allConfirmed && outcome.confidence >= 0.9 && !outcome.tampering_suspected) {
-    status = "approved"
-  } else if (
+    return "approved"
+  }
+  if (
     outcome.tampering_suspected ||
     (noneConfirmed && outcome.confidence >= 0.8)
   ) {
-    status = "rejected"
+    return "rejected"
   }
-
-  // Fraud signals veto auto-approval — creator gets the final call.
-  if (status === "approved" && fraudFlags.length > 0) status = "needs_review"
-  return status
+  return "needs_review"
 }
 
 function buildPrompt(
@@ -335,7 +340,6 @@ export async function runVerification(
 
   const trackActions = !!req && (req.require_like || req.require_repost)
   const followTargets = targets ?? []
-  if ((!trackActions && followTargets.length === 0) || !proofs?.length) return
 
   // The required actions, as a checklist. Each fan-uploaded screenshot is no
   // longer tagged to a specific requirement; instead the AI checks every
@@ -374,7 +378,7 @@ export async function runVerification(
 
   if (!stored) {
     error = "Creator has no verification (AI) key configured."
-  } else if (requirements.length === 0 || proofs.length === 0) {
+  } else if (requirements.length === 0 || !proofs?.length) {
     error = "No screenshots to verify."
   } else {
     try {
@@ -419,11 +423,7 @@ export async function runVerification(
     }
   }
 
-  const finalStatus = decideFinalStatus(
-    outcome,
-    requirements.length,
-    (submission.fraud_flags as string[]) ?? []
-  )
+  const finalStatus = decideFinalStatus(outcome, requirements.length)
 
   await admin.from("verification_runs").insert({
     submission_id: submissionId,
@@ -443,11 +443,17 @@ export async function runVerification(
     error,
   })
 
+  const flags = ((submission.fraud_flags as string[]) ?? []).slice()
+  if (error && !flags.includes("ai_unavailable")) flags.push("ai_unavailable")
+
+  const now = new Date().toISOString()
   const { data: finalized, error: finalizeError } = await admin
     .from("submissions")
     .update({
       status: finalStatus,
-      decided_at: finalStatus === "needs_review" ? null : new Date().toISOString(),
+      decided_at: finalStatus === "needs_review" ? null : now,
+      fraud_flags: flags,
+      ...(finalStatus === "needs_review" ? { review_started_at: now } : {}),
     })
     .eq("id", submissionId)
     .eq("status", "verifying")
@@ -463,36 +469,38 @@ export async function runVerification(
   // the verifying -> terminal compare-and-set may emit events or deliver mail.
   if (!finalized) return
 
-  if (finalStatus !== "needs_review") {
+  if (error && stored && isKeyProblem(error)) {
+    await markAiKeyBroken(admin, gate.creator_id, stored.id, stored.provider, error)
+  }
+
+  const unlockSubmission = {
+    id: submissionId,
+    gate_id: submission.gate_id,
+    email: submission.email,
+    status_token: submission.status_token,
+  }
+
+  if (finalStatus === "approved") {
+    await completeApproval(admin, unlockSubmission, gate)
+  } else if (finalStatus === "rejected") {
     await admin.from("events").insert({
       gate_id: submission.gate_id,
       submission_id: submissionId,
-      event_type: finalStatus === "approved" ? "approve" : "reject",
+      event_type: "reject",
     })
-  }
-
-  if (finalStatus === "approved" && submission.email) {
+  } else {
+    const aiNote =
+      outcome?.results.find((r) => !r.confirmed)?.note || outcome?.fan_message || null
     try {
-      if (gate.kind === "vault") {
-        await sendVaultDownloadEmail({
-          creatorId: gate.creator_id,
-          to: submission.email,
-          gateTitle: gate.title,
-          artist: gate.artist,
-          statusToken: submission.status_token,
-        })
-      } else {
-        const token = await mintDownloadToken(submissionId)
-        await sendDownloadEmail({
-          creatorId: gate.creator_id,
-          to: submission.email,
-          gateTitle: gate.title,
-          artist: gate.artist,
-          downloadToken: token,
-        })
-      }
+      await sendReviewNeededEmail({
+        creatorId: gate.creator_id,
+        gateTitle: gate.title,
+        fanEmail: submission.email,
+        aiNote,
+        reviewUrl: reviewUrl(submissionId),
+      })
     } catch (err) {
-      console.error("download email failed:", err)
+      console.error("review email failed:", err)
     }
   }
 }

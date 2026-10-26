@@ -63,6 +63,35 @@ function submission(kind: "single" | "vault") {
   }
 }
 
+// A chainable stand-in for the service-role client: updates resolve, the
+// download-email claim succeeds, and inserts are recorded per table.
+function adminClient() {
+  const inserts: { table: string; payload: unknown }[] = []
+  const updates: { table: string; payload: unknown }[] = []
+  const admin = {
+    from: vi.fn((table: string) => {
+      const builder: Record<string, unknown> = {}
+      Object.assign(builder, {
+        update: vi.fn((payload: unknown) => {
+          updates.push({ table, payload })
+          return builder
+        }),
+        insert: vi.fn((payload: unknown) => {
+          inserts.push({ table, payload })
+          return Promise.resolve({ error: null })
+        }),
+        eq: vi.fn(() => builder),
+        is: vi.fn(() => builder),
+        select: vi.fn(() => builder),
+        maybeSingle: vi.fn().mockResolvedValue({ data: { id: "submission-1" }, error: null }),
+        then: (resolve: (value: unknown) => void) => resolve({ data: null, error: null }),
+      })
+      return builder
+    }),
+  }
+  return { admin, inserts, updates }
+}
+
 function arrangeApproval(kind: "single" | "vault") {
   const loadQuery = queryReturning(submission(kind))
   const updateQuery = queryReturning({ id: "submission-1" })
@@ -71,16 +100,13 @@ function arrangeApproval(kind: "single" | "vault") {
     from: vi.fn().mockReturnValue(loadQuery),
   }
   const updateClient = { from: vi.fn().mockReturnValue(updateQuery) }
-  const insertEvent = vi.fn().mockResolvedValue({ error: null })
-  const admin = {
-    from: vi.fn().mockReturnValue({ insert: insertEvent }),
-  }
+  const { admin, inserts, updates } = adminClient()
 
   mocks.createClient
     .mockResolvedValueOnce(loadClient)
     .mockResolvedValueOnce(updateClient)
   mocks.createAdminClient.mockReturnValue(admin)
-  return { insertEvent, updateQuery }
+  return { inserts, updates, updateQuery }
 }
 
 function approvalForm() {
@@ -93,12 +119,12 @@ describe("manual review approval delivery", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.mintDownloadToken.mockResolvedValue("single-download-token")
-    mocks.sendDownloadEmail.mockResolvedValue(undefined)
-    mocks.sendVaultDownloadEmail.mockResolvedValue(undefined)
+    mocks.sendDownloadEmail.mockResolvedValue(true)
+    mocks.sendVaultDownloadEmail.mockResolvedValue(true)
   })
 
   it("emails the durable vault page and does not mint a single-file token", async () => {
-    const { insertEvent } = arrangeApproval("vault")
+    const { inserts, updates } = arrangeApproval("vault")
 
     await approveSubmissionAction(approvalForm())
 
@@ -108,14 +134,23 @@ describe("manual review approval delivery", () => {
       gateTitle: "The Complete Vault",
       artist: "Test Artist",
       statusToken: STATUS_TOKEN,
+      idempotencyKey: "download-submission-1",
     })
     expect(mocks.mintDownloadToken).not.toHaveBeenCalled()
     expect(mocks.sendDownloadEmail).not.toHaveBeenCalled()
-    expect(insertEvent).toHaveBeenCalledWith({
-      gate_id: "gate-1",
-      submission_id: "submission-1",
-      event_type: "approve",
+    expect(inserts).toContainEqual({
+      table: "events",
+      payload: {
+        gate_id: "gate-1",
+        submission_id: "submission-1",
+        event_type: "approve",
+      },
     })
+    // Access is recorded and the email is claimed once, not released.
+    expect(updates.map((u) => Object.keys(u.payload as object)[0])).toEqual([
+      "unlocked_at",
+      "download_emailed_at",
+    ])
     expect(mocks.revalidatePath).toHaveBeenCalledWith("/dashboard/reviews")
   })
 
@@ -131,6 +166,7 @@ describe("manual review approval delivery", () => {
       gateTitle: "New Single",
       artist: "Test Artist",
       downloadToken: "single-download-token",
+      idempotencyKey: "download-submission-1",
     })
     expect(mocks.sendVaultDownloadEmail).not.toHaveBeenCalled()
   })

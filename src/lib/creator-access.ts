@@ -1,5 +1,6 @@
 import "server-only"
 
+import { isKeyProblem } from "@/lib/ai-keys"
 import {
   CREATOR_INSTAGRAM_HANDLE,
   CREATOR_INSTAGRAM_URL,
@@ -45,11 +46,12 @@ export async function verifyCreatorInstagramFollow(
   images: { mime: string; b64: string }[]
 ): Promise<AccessCheck> {
   const key = process.env.PLATFORM_OPENAI_API_KEY
+  // Like fan gates, this fails open when the platform key itself can't run
+  // (missing, out of credits, revoked): a broken key must not lock every new
+  // artist out. Passing glitches still ask for a retry.
   if (!key) {
-    return {
-      confirmed: false,
-      message: "Verification is temporarily unavailable — try again shortly.",
-    }
+    console.error("[creator-access] PLATFORM_OPENAI_API_KEY is not set; letting the creator in")
+    return { confirmed: true, message: "Welcome in!" }
   }
 
   const prompt = `You verify a screenshot proving someone follows a specific
@@ -103,6 +105,11 @@ stitched, or AI-generated images, or a photo of another screen.`
 
     const body = await res.json()
     if (!res.ok) {
+      const error: string = body?.error?.message ?? `HTTP ${res.status}`
+      if (body?.error?.type === "insufficient_quota" || isKeyProblem(error)) {
+        console.error("[creator-access] platform key can't run; letting the creator in:", error)
+        return { confirmed: true, message: "Welcome in!" }
+      }
       return {
         confirmed: false,
         message: "Couldn't verify right now — please try again.",

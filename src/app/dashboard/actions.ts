@@ -37,8 +37,8 @@ export async function publishGate(formData: FormData) {
   } = await supabase.auth.getUser()
   if (!user) return
 
-  // Same publish guards as the wizard: an HQ file must exist, and SoundCloud
-  // gates need a valid OpenAI key.
+  // Same publish guards as the wizard: an HQ file must exist, and Verified
+  // gates need a valid AI key.
   const [{ data: asset }, { data: req }] = await Promise.all([
     supabase
       .from("download_assets")
@@ -47,13 +47,14 @@ export async function publishGate(formData: FormData) {
       .maybeSingle(),
     supabase
       .from("gate_requirements")
-      .select("soundcloud_enabled, instagram_enabled, spotify_enabled")
+      .select("soundcloud_enabled, instagram_enabled, spotify_enabled, unlock_mode")
       .eq("gate_id", gateId)
       .maybeSingle(),
   ])
   if (!asset) return
   const aiGate =
-    req?.soundcloud_enabled || req?.instagram_enabled || req?.spotify_enabled
+    req?.unlock_mode === "verified" &&
+    (req.soundcloud_enabled || req.instagram_enabled || req.spotify_enabled)
   if (aiGate && !(await hasValidAiKey(user.id))) return
 
   await supabase

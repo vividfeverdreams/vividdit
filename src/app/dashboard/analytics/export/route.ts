@@ -22,13 +22,28 @@ export async function GET() {
     .eq("creator_id", user.id)
   const slugById = new Map((gates ?? []).map((g) => [g.id, g.slug]))
 
-  const { data: events } = await supabase
-    .from("events")
-    .select(
-      "gate_id, event_type, utm_source, utm_medium, utm_campaign, referrer, source, created_at"
-    )
-    .order("created_at", { ascending: true })
-    .limit(50_000)
+  // The API returns at most 1,000 rows per request, so page through them.
+  const events: {
+    gate_id: string
+    event_type: string
+    utm_source: string | null
+    utm_medium: string | null
+    utm_campaign: string | null
+    referrer: string | null
+    source: string | null
+    created_at: string
+  }[] = []
+  for (let from = 0; from < 200_000; from += 1000) {
+    const { data: page } = await supabase
+      .from("events")
+      .select(
+        "gate_id, event_type, utm_source, utm_medium, utm_campaign, referrer, source, created_at"
+      )
+      .order("id", { ascending: true })
+      .range(from, from + 999)
+    events.push(...(page ?? []))
+    if (!page || page.length < 1000) break
+  }
 
   const rows = [
     [
@@ -42,7 +57,7 @@ export async function GET() {
       "at",
     ],
   ]
-  for (const e of events ?? []) {
+  for (const e of events) {
     rows.push([
       slugById.get(e.gate_id) ?? e.gate_id,
       e.event_type,

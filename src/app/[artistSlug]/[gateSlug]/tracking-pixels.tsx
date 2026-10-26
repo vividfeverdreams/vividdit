@@ -24,6 +24,8 @@ export function TrackingPixels({
 
   useEffect(() => {
     const stored = localStorage.getItem(CONSENT_KEY)
+    // localStorage is only readable after hydration.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (stored === "granted" || stored === "denied") setConsent(stored)
   }, [])
 

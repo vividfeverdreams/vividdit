@@ -7,19 +7,30 @@ import type { NextConfig } from "next";
 // meaningful hardening here is frame-ancestors (anti-clickjacking), object-src
 // 'none', and base-uri 'self'. (Inline scripts/styles are allowed because Next
 // emits inline bootstrap; nonce-based CSP is a future hardening step.)
+// Local Supabase runs on plain http (127.0.0.1:54321), which "https:" doesn't
+// cover; allow the configured project origin explicitly so direct-to-Storage
+// uploads work in development too. In production it's https and already allowed.
+const supabaseOrigin = (() => {
+  try {
+    return new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? "").origin
+  } catch {
+    return ""
+  }
+})()
+
 const csp = [
   "default-src 'self'",
   "base-uri 'self'",
   "object-src 'none'",
   "frame-ancestors 'self'",
   "form-action 'self'",
-  "img-src 'self' data: blob: https:",
+  `img-src 'self' data: blob: https: ${supabaseOrigin}`.trim(),
   "media-src 'self' https:",
   "font-src 'self' data:",
   "style-src 'self' 'unsafe-inline'",
   "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://connect.facebook.net https://www.googletagmanager.com https://www.google-analytics.com https://analytics.tiktok.com https://*.tiktok.com",
   "frame-src 'self' https://w.soundcloud.com https://www.facebook.com https://td.doubleclick.net https://bid.g.doubleclick.net https://www.googletagmanager.com",
-  "connect-src 'self' https: wss:",
+  `connect-src 'self' https: wss: ${supabaseOrigin}`.trim(),
 ].join("; ")
 
 const securityHeaders = [

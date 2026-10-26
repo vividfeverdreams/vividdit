@@ -6,6 +6,11 @@ import { useState } from "react"
 
 import { updateGateAction } from "@/app/dashboard/gates/[id]/edit/actions"
 import { FollowList, GatePreview } from "@/app/dashboard/gates/new/wizard"
+import {
+  HeavyGateWarning,
+  UnlockModeField,
+  type UnlockMode,
+} from "@/app/dashboard/gates/unlock-fields"
 import { setGateInVault } from "@/app/dashboard/vault-actions"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -13,10 +18,12 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
+import { countAsks } from "@/lib/gate-asks"
 import { extractPaletteFromImage } from "@/lib/palette-client"
 import { uploadCoverImage } from "@/lib/uploads"
 
 type Initial = {
+  unlockMode: UnlockMode
   accentColor: string
   backgroundColor: string
   emailEnabled: boolean
@@ -67,6 +74,7 @@ export function GateEditor({
     void setGateInVault(id, value)
   }
 
+  const [unlockMode, setUnlockMode] = useState<UnlockMode>(initial.unlockMode)
   const [accentColor, setAccentColor] = useState(initial.accentColor)
   const [backgroundColor, setBackgroundColor] = useState(initial.backgroundColor)
   const [emailEnabled, setEmailEnabled] = useState(initial.emailEnabled)
@@ -110,7 +118,12 @@ export function GateEditor({
     ...igFollows.map((url) => ({ platform: "instagram" as const, url })),
     ...spFollows.map((url) => ({ platform: "spotify" as const, url })),
   ].filter((t) => t.url.trim())
-  const aiGate = trackActions || allFollows.length > 0
+  const asks = countAsks({
+    emailEnabled,
+    requireLike,
+    requireRepost,
+    followCount: allFollows.length,
+  })
 
   const pullColors = async () => {
     if (!previewCover) return
@@ -139,6 +152,7 @@ export function GateEditor({
         requireLike,
         requireRepost,
         requireProofCode,
+        unlockMode,
         followTargets: allFollows,
       })
       if (!result.ok) {
@@ -186,6 +200,12 @@ export function GateEditor({
         <CardContent className="space-y-5 pt-6">
           <h2 className="font-medium">Unlock requirements</h2>
 
+          <UnlockModeField
+            value={unlockMode}
+            onChange={setUnlockMode}
+            hasValidKey={hasValidKey}
+          />
+
           <div className="flex items-center justify-between">
             <div>
               <Label htmlFor="emailGate">Email gate</Label>
@@ -199,17 +219,6 @@ export function GateEditor({
               onCheckedChange={setEmailEnabled}
             />
           </div>
-
-          {aiGate && !hasValidKey && (
-            <Alert variant="destructive">
-              <AlertDescription>
-                Follow/like/repost gates need a valid OpenAI key to stay live.{" "}
-                <Link href="/dashboard/settings" className="underline">
-                  Add one in Settings.
-                </Link>
-              </AlertDescription>
-            </Alert>
-          )}
 
           {!isVault && (
             <div className="space-y-3 rounded-lg border p-4">
@@ -230,7 +239,7 @@ export function GateEditor({
                   {label}
                 </label>
               ))}
-              {trackActions && (
+              {trackActions && unlockMode === "verified" && (
                 <div className="flex items-center justify-between border-t pt-3">
                   <div>
                     <Label htmlFor="proofCode">Proof code</Label>
@@ -273,6 +282,8 @@ export function GateEditor({
               own={ownProfiles.spotify}
             />
           </div>
+
+          <HeavyGateWarning asks={asks} />
         </CardContent>
       </Card>
 
@@ -373,7 +384,7 @@ export function GateEditor({
               onClick={pullColors}
               disabled={pullingColors}
             >
-              {pullingColors ? "Reading cover…" : "🎨 Pull colors from cover art"}
+              {pullingColors ? "Reading cover…" : "Pull colors from cover art"}
             </Button>
           )}
 

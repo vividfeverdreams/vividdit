@@ -17,18 +17,18 @@ function outcome(overrides: Partial<VerificationOutcome> = {}): VerificationOutc
 
 describe("verification decision policy", () => {
   it("auto-approves when all items confirmed, high confidence, no tampering", () => {
-    expect(decideFinalStatus(outcome(), 2, [])).toBe("approved")
+    expect(decideFinalStatus(outcome(), 2)).toBe("approved")
   })
 
   it("routes to review below 0.90 confidence", () => {
-    expect(decideFinalStatus(outcome({ confidence: 0.89 }), 2, [])).toBe(
+    expect(decideFinalStatus(outcome({ confidence: 0.89 }), 2)).toBe(
       "needs_review"
     )
   })
 
   it("never approves with tampering suspected", () => {
     expect(
-      decideFinalStatus(outcome({ tampering_suspected: true }), 2, [])
+      decideFinalStatus(outcome({ tampering_suspected: true }), 2)
     ).toBe("rejected")
   })
 
@@ -41,8 +41,7 @@ describe("verification decision policy", () => {
             { label: "b", confirmed: false, note: "no" },
           ],
         }),
-        2,
-        []
+        2
       )
     ).toBe("needs_review")
   })
@@ -57,21 +56,20 @@ describe("verification decision policy", () => {
             { label: "b", confirmed: false, note: "no" },
           ],
         }),
-        2,
-        []
+        2
       )
     ).toBe("rejected")
   })
 
   it("routes to review when the result count doesn't match expected", () => {
-    expect(decideFinalStatus(outcome(), 3, [])).toBe("needs_review")
+    expect(decideFinalStatus(outcome(), 3)).toBe("needs_review")
   })
 
-  it("fraud flags veto auto-approval", () => {
-    expect(decideFinalStatus(outcome(), 2, ["repeat_ip"])).toBe("needs_review")
+  it("fails open when the AI couldn't run (no key, no credits, outage)", () => {
+    expect(decideFinalStatus(null, 2)).toBe("approved")
   })
 
-  it("missing outcome (API error) routes to review", () => {
-    expect(decideFinalStatus(null, 2, [])).toBe("needs_review")
+  it("routes to review when there was nothing to check", () => {
+    expect(decideFinalStatus(outcome({ results: [] }), 0)).toBe("needs_review")
   })
 })

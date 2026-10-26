@@ -13,6 +13,7 @@ import {
   CardDescription,
   CardTitle,
 } from "@/components/ui/card"
+import { countAsks, HEAVY_GATE_ASKS } from "@/lib/gate-asks"
 import { createClient } from "@/lib/supabase/server"
 import {
   VAULT_RESCUE_PROOF_CODE,
@@ -58,7 +59,7 @@ export default async function GatesPage({
       supabase
         .from("gates")
         .select(
-          "id, title, artist, slug, status, created_at, cover_path, theme, kind, in_vault"
+          "id, title, artist, slug, status, created_at, cover_path, theme, kind, in_vault, gate_requirements(unlock_mode, email_enabled, require_like, require_repost), gate_follow_targets(id)"
         )
         .eq("creator_id", user!.id),
       supabase.from("profiles").select("artist_slug").eq("id", user!.id).single(),
@@ -78,7 +79,32 @@ export default async function GatesPage({
   const statFor = (id: string) =>
     statById.get(id) ?? { views: 0, downloads: 0, emails: 0 }
 
-  const all = (gatesRaw ?? []).map((g) => ({ ...g, stat: statFor(g.id) }))
+  type Req = {
+    unlock_mode: string
+    email_enabled: boolean
+    require_like: boolean
+    require_repost: boolean
+  }
+  const all = (gatesRaw ?? []).map((g) => {
+    // gate_requirements is one-to-one; PostgREST may embed it as an object or
+    // a one-item array depending on how it reads the constraint.
+    const raw = g.gate_requirements as unknown
+    const req = (Array.isArray(raw) ? raw[0] : raw) as Req | undefined
+    const asks = req
+      ? countAsks({
+          emailEnabled: req.email_enabled,
+          requireLike: req.require_like,
+          requireRepost: req.require_repost,
+          followCount: ((g.gate_follow_targets as unknown[]) ?? []).length,
+        })
+      : 0
+    return {
+      ...g,
+      stat: statFor(g.id),
+      verified: req?.unlock_mode === "verified",
+      asks,
+    }
+  })
 
   // The vault is shown in its own card, not the gate list.
   const vault = all.find((g) => g.kind === "vault") ?? null
@@ -128,6 +154,31 @@ export default async function GatesPage({
         </Button>
       </div>
 
+      {profile?.artist_slug && singles.some((g) => g.status === "published") && (
+        <Card>
+          <CardContent className="flex flex-wrap items-center gap-4 py-4">
+            <div className="min-w-0 flex-1">
+              <p className="font-medium">Your artist page</p>
+              <p className="text-sm text-muted-foreground">
+                Every free download in one link, with the vault on top. Made for
+                your bio.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <CopyUrlButton url={`${siteUrl}/${profile.artist_slug}`} />
+              <Button
+                size="sm"
+                variant="outline"
+                render={<a href={`/${profile.artist_slug}`} target="_blank" rel="noreferrer" />}
+                nativeButton={false}
+              >
+                Open
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <div className="flex items-center gap-2">
         <span className="text-sm text-muted-foreground">Sort</span>
         <SortSelect value={sort} />
@@ -137,7 +188,7 @@ export default async function GatesPage({
         <CardContent className="space-y-3 py-4">
           <div className="flex flex-wrap items-center gap-4">
             <div className="min-w-0 flex-1">
-              <p className="font-medium">🗝️ The Complete Vault</p>
+              <p className="font-medium">The Complete Vault</p>
               <p className="text-sm text-muted-foreground">
                 {vault?.status === "published"
                   ? "Fans complete your follow steps once to download every track in your vault."
@@ -240,6 +291,20 @@ export default async function GatesPage({
                       <p className="truncate font-medium">{g.title}</p>
                       <p className="truncate text-sm text-muted-foreground">
                         {g.artist} · /{profile?.artist_slug}/{g.slug}
+                      </p>
+                      <p className="mt-1 flex flex-wrap gap-1.5">
+                        <Badge variant="outline">
+                          {g.verified ? "Verified" : "Quick unlock"}
+                        </Badge>
+                        {g.asks > HEAVY_GATE_ASKS && (
+                          <Badge
+                            variant="outline"
+                            className="border-amber-500/50 text-amber-700 dark:text-amber-400"
+                            title="Every extra step loses fans. Email plus two follows unlocks the most downloads."
+                          >
+                            {g.asks} asks: heavy
+                          </Badge>
+                        )}
                       </p>
                     </div>
 

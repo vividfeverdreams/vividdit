@@ -25,7 +25,7 @@ const items = [
 const TUTORIALS_URL =
   "https://youtube.com/playlist?list=PLWmaqUTb9eUAeX43wnZnAqngAN_GfA1MT"
 
-export function DashboardNav() {
+export function DashboardNav({ reviewCount = 0 }: { reviewCount?: number }) {
   const pathname = usePathname()
 
   return (
@@ -48,6 +48,14 @@ export function DashboardNav() {
           >
             <Icon className="size-4" />
             {label}
+            {href === "/dashboard/reviews" && reviewCount > 0 && (
+              <span
+                className="ml-auto inline-flex min-w-5 items-center justify-center rounded-full bg-destructive px-1.5 text-xs font-semibold text-white"
+                aria-label={`${reviewCount} waiting`}
+              >
+                {reviewCount}
+              </span>
+            )}
           </Link>
         )
       })}

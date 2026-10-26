@@ -48,7 +48,9 @@ export default async function EditGatePage({
     await Promise.all([
       supabase
         .from("gate_requirements")
-        .select("email_enabled, require_like, require_repost, require_proof_code")
+        .select(
+          "email_enabled, require_like, require_repost, require_proof_code, unlock_mode"
+        )
         .eq("gate_id", id)
         .maybeSingle(),
       supabase
@@ -93,6 +95,7 @@ export default async function EditGatePage({
         spotify: profile?.spotify_url ?? null,
       }}
       initial={{
+        unlockMode: req?.unlock_mode === "verified" ? "verified" : "quick",
         accentColor: theme.accentColor ?? "#18181b",
         backgroundColor: theme.backgroundColor ?? "#0a0a0a",
         emailEnabled: req?.email_enabled ?? true,

@@ -20,6 +20,11 @@ export async function uploadProofFiles(input: {
   submissionId: string
   statusToken: string
   files: File[]
+  // Set for a single step's screenshot; the whole set is verified on unlock.
+  step?: {
+    platform: "soundcloud" | "instagram" | "spotify"
+    followTargetId: string | null
+  }
 }): Promise<number> {
   let batchId: string | null = null
 
@@ -70,6 +75,13 @@ export async function uploadProofFiles(input: {
           path: target.path,
           name: input.files[index].name,
         })),
+        ...(input.step
+          ? {
+              finalize: false,
+              platform: input.step.platform,
+              followTargetId: input.step.followTargetId,
+            }
+          : {}),
       })
     } catch (completionError) {
       // A Server Action response can be lost after its database transaction

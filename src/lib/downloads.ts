@@ -20,6 +20,21 @@ export const EMAIL_TOKEN_TTL_HOURS = 72
 export const EMAIL_TOKEN_MAX_USES = 5
 export const MAX_STATUS_DOWNLOADS = 10
 
+/**
+ * A fan can download once approved, or once unlocked while a screenshot check
+ * is still open. A rejection (by the AI or the creator) ends access.
+ */
+export function hasDownloadAccess(submission: {
+  status: string
+  unlocked_at: string | null
+}): boolean {
+  if (submission.status === "approved") return true
+  return (
+    !!submission.unlocked_at &&
+    (submission.status === "verifying" || submission.status === "needs_review")
+  )
+}
+
 function hashToken(raw: string): string {
   return createHash("sha256").update(raw).digest("hex")
 }
@@ -50,10 +65,10 @@ async function signedUrlForSubmission(
 
   const { data: submission } = await admin
     .from("submissions")
-    .select("id, gate_id, status, gates(creator_id)")
+    .select("id, gate_id, status, unlocked_at, gates(creator_id)")
     .eq("id", submissionId)
     .maybeSingle()
-  if (!submission || submission.status !== "approved") {
+  if (!submission || !hasDownloadAccess(submission)) {
     return { ok: false, reason: "not_found" }
   }
   const gate = submission.gates as unknown as { creator_id: string }
@@ -123,7 +138,7 @@ export type VaultFile = { title: string; filename: string; url: string }
  * Vault delivery: given an approved vault submission's status token, returns a
  * freshly-signed download link for every HQ file the creator has flagged into
  * the vault (every published `in_vault` single gate). Returns null if the token
- * isn't an approved vault submission.
+ * isn't an unlocked vault submission.
  */
 export async function getVaultDownloads(
   statusToken: string
@@ -133,14 +148,14 @@ export async function getVaultDownloads(
   const { data: submission, error: submissionError } = await admin
     .from("submissions")
     .select(
-      "id, gate_id, status, proof_code, user_agent, gates(creator_id, kind, status)"
+      "id, gate_id, status, unlocked_at, proof_code, user_agent, gates(creator_id, kind, status)"
     )
     .eq("status_token", statusToken)
     .maybeSingle()
   if (submissionError) {
     throw new Error(`Couldn't load the vault grant: ${submissionError.message}`)
   }
-  if (!submission || submission.status !== "approved") return null
+  if (!submission || !hasDownloadAccess(submission)) return null
   const vaultGate = submission.gates as unknown as {
     creator_id: string
     kind: string

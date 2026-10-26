@@ -5,6 +5,7 @@ import { z } from "zod"
 
 import { hasValidAiKey } from "@/lib/ai-keys"
 import { isHttpUrl, profileLabel } from "@/lib/profiles"
+import { spotifyArtistName } from "@/lib/spotify"
 import { createClient } from "@/lib/supabase/server"
 
 const hex = z.string().regex(/^#[0-9a-fA-F]{6}$/, "Use a hex color like #1a1a1a")
@@ -18,6 +19,7 @@ const updateGateSchema = z.object({
   requireLike: z.boolean(),
   requireRepost: z.boolean(),
   requireProofCode: z.boolean(),
+  unlockMode: z.enum(["quick", "verified"]),
   followTargets: z.array(
     z.object({
       platform: z.enum(["soundcloud", "instagram", "spotify"]),
@@ -55,20 +57,22 @@ export async function updateGateAction(
 
   const trackActions = d.requireLike || d.requireRepost
   const targets = d.followTargets.filter((t) => isHttpUrl(t.url))
-  const aiGate = trackActions || targets.length > 0
+  const socialSteps = trackActions || targets.length > 0
+  // Only Verified gates check screenshots, so only they need an AI key.
+  const aiGate = socialSteps && d.unlockMode === "verified"
 
-  if (!d.emailEnabled && !aiGate) {
+  if (!d.emailEnabled && !socialSteps) {
     return { ok: false, error: "Enable at least one unlock requirement." }
   }
   if (d.followTargets.some((t) => !isHttpUrl(t.url))) {
     return { ok: false, error: "Every follow profile needs a valid URL." }
   }
-  // A live (published) social gate needs a working verification key.
+  // A live (published) Verified gate needs a working verification key.
   if (gate.status === "published" && aiGate && !(await hasValidAiKey(user.id))) {
     return {
       ok: false,
       error:
-        "Follow/social gates need a valid OpenAI key for proof verification. Add one in Settings, or switch to an email-only gate.",
+        "Verified gates need a working AI key to check screenshots. Add one in Settings, or switch to Quick unlock.",
     }
   }
 
@@ -108,27 +112,83 @@ export async function updateGateAction(
       require_proof_code: trackActions && d.requireProofCode,
       instagram_enabled: targets.some((t) => t.platform === "instagram"),
       spotify_enabled: targets.some((t) => t.platform === "spotify"),
+      unlock_mode: d.unlockMode,
     })
     .eq("gate_id", d.gateId)
   if (reqError) return { ok: false, error: "Couldn't save the requirements." }
 
-  // Replace follow targets (FK on proof_images is ON DELETE SET NULL, so old
-  // proofs are unaffected).
-  await supabase.from("gate_follow_targets").delete().eq("gate_id", d.gateId)
-  if (targets.length > 0) {
+  // Keep the ids of follow targets that didn't change: fans' saved progress
+  // and Verified screenshots are keyed by them. Only removed targets are
+  // deleted (proof_images.follow_target_id is ON DELETE SET NULL) and only new
+  // ones inserted.
+  const { data: existing } = await supabase
+    .from("gate_follow_targets")
+    .select("id, platform, profile_url, display_name")
+    .eq("gate_id", d.gateId)
+  const unused = [...(existing ?? [])]
+  const keep: { id: string; sort_order: number }[] = []
+  const add: { platform: string; url: string; sort_order: number }[] = []
+  targets.forEach((t, i) => {
+    const match = unused.findIndex(
+      (e) => e.platform === t.platform && e.profile_url === t.url
+    )
+    if (match === -1) {
+      add.push({ platform: t.platform, url: t.url, sort_order: i })
+    } else {
+      keep.push({ id: unused[match].id, sort_order: i })
+      unused.splice(match, 1)
+    }
+  })
+
+  if (unused.length > 0) {
+    await supabase
+      .from("gate_follow_targets")
+      .delete()
+      .in(
+        "id",
+        unused.map((e) => e.id)
+      )
+  }
+  for (const k of keep) {
+    await supabase
+      .from("gate_follow_targets")
+      .update({ sort_order: k.sort_order })
+      .eq("id", k.id)
+  }
+  if (add.length > 0) {
     const { error: targetError } = await supabase
       .from("gate_follow_targets")
       .insert(
-        targets.map((t, i) => ({
-          gate_id: d.gateId,
-          platform: t.platform,
-          profile_url: t.url,
-          display_name: profileLabel(t.platform, t.url),
-          sort_order: i,
-        }))
+        await Promise.all(
+          add.map(async (t) => ({
+            gate_id: d.gateId,
+            platform: t.platform,
+            profile_url: t.url,
+            display_name:
+              (t.platform === "spotify" && (await spotifyArtistName(t.url))) ||
+              profileLabel(t.platform, t.url),
+            sort_order: t.sort_order,
+          }))
+        )
       )
     if (targetError) {
       return { ok: false, error: "Couldn't save the follow profiles." }
+    }
+  }
+  // Older Spotify targets were saved as "Spotify profile"; name them now.
+  for (const e of existing ?? []) {
+    if (
+      e.platform === "spotify" &&
+      keep.some((k) => k.id === e.id) &&
+      (!e.display_name || e.display_name === "Spotify profile")
+    ) {
+      const name = await spotifyArtistName(e.profile_url)
+      if (name) {
+        await supabase
+          .from("gate_follow_targets")
+          .update({ display_name: name })
+          .eq("id", e.id)
+      }
     }
   }
 

@@ -309,6 +309,16 @@ export async function createProofUploadTargets(input: {
 }): Promise<ProofUploadPreparation> {
   const files = normalizeDescriptors(input.files)
   const admin = createAdminClient()
+  // An artist's revocation is final: no new screenshots for that submission.
+  const { data: flagged } = await admin
+    .from("submissions")
+    .select("fraud_flags")
+    .eq("id", input.submissionId)
+    .eq("status_token", input.statusToken)
+    .maybeSingle()
+  if (((flagged?.fraud_flags as string[] | null) ?? []).includes("revoked")) {
+    fail("This submission is not accepting screenshots.", 409)
+  }
   const reserved = await reserveProofUploadBatch(admin, {
     submissionId: input.submissionId,
     statusToken: input.statusToken,

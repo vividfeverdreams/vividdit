@@ -1,6 +1,5 @@
 "use client"
 
-import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useEffect, useState, useTransition } from "react"
 
@@ -10,6 +9,12 @@ import {
   getHqUploadTargetAction,
   resolveTrackAction,
 } from "@/app/dashboard/gates/new/actions"
+import {
+  HeavyGateWarning,
+  UnlockModeField,
+  type UnlockMode,
+} from "@/app/dashboard/gates/unlock-fields"
+import { countAsks } from "@/lib/gate-asks"
 import { extractPaletteFromImage } from "@/lib/palette-client"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -24,7 +29,7 @@ import {
   uploadToPresignedUrl,
   type HqUploadResult,
 } from "@/lib/uploads"
-import { muted, readableAccent, readableForeground } from "@/lib/colors"
+import { gateTheme, readableAccent } from "@/lib/colors"
 import { slugify, slugRegex } from "@/lib/validation"
 
 type Asset = HqUploadResult & { storageProvider: "supabase" | "r2" }
@@ -70,6 +75,8 @@ export function GateWizard({
   useEffect(() => {
     try {
       if (localStorage.getItem(DISCLAIMER_DISMISSED_KEY) !== "1") {
+        // localStorage is only readable after hydration.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setShowDisclaimer(true)
       }
     } catch {
@@ -112,14 +119,20 @@ export function GateWizard({
   const [googleLabel, setGoogleLabel] = useState("")
   const [tiktokPixel, setTiktokPixel] = useState("")
 
-  // Step 4 — unlock requirements
+  // Step 4 — unlock requirements. New gates start light: email plus the
+  // creator's own SoundCloud and Instagram, unlocked with Quick unlock.
+  const [unlockMode, setUnlockMode] = useState<UnlockMode>("quick")
   const [emailEnabled, setEmailEnabled] = useState(true)
   const [requireLike, setRequireLike] = useState(false)
   const [requireRepost, setRequireRepost] = useState(false)
   const [requireProofCode, setRequireProofCode] = useState(false)
   // Multiple follow profiles per platform (each becomes a fan step).
-  const [scFollows, setScFollows] = useState<string[]>([])
-  const [igFollows, setIgFollows] = useState<string[]>([])
+  const [scFollows, setScFollows] = useState<string[]>(
+    ownProfiles.soundcloud ? [ownProfiles.soundcloud] : []
+  )
+  const [igFollows, setIgFollows] = useState<string[]>(
+    ownProfiles.instagram ? [ownProfiles.instagram] : []
+  )
   const [spFollows, setSpFollows] = useState<string[]>([])
 
   const trackActions = requireLike || requireRepost
@@ -128,6 +141,12 @@ export function GateWizard({
     ...igFollows.map((url) => ({ platform: "instagram" as const, url })),
     ...spFollows.map((url) => ({ platform: "spotify" as const, url })),
   ].filter((t) => t.url.trim())
+  const asks = countAsks({
+    emailEnabled,
+    requireLike,
+    requireRepost,
+    followCount: allFollows.length,
+  })
 
   // Step 5 — slug + publish
   const [slug, setSlug] = useState("")
@@ -258,6 +277,7 @@ export function GateWizard({
         requireLike,
         requireRepost,
         requireProofCode,
+        unlockMode,
         followTargets: allFollows,
         tracking: {
           facebookPixelId: fbPixel.trim() || null,
@@ -457,7 +477,7 @@ export function GateWizard({
               )}
               <p className="text-xs text-muted-foreground">
                 Stored privately — fans only get short-lived signed links after
-                unlocking. You can skip this for now, but it's required to publish.
+                unlocking. You can skip this for now, but it&apos;s required to publish.
               </p>
             </div>
           )}
@@ -592,6 +612,12 @@ export function GateWizard({
 
           {step === 3 && (
             <div className="space-y-5">
+              <UnlockModeField
+                value={unlockMode}
+                onChange={setUnlockMode}
+                hasValidKey={hasValidKey}
+              />
+
               <div className="flex items-center justify-between">
                 <div>
                   <Label htmlFor="emailGate">Email gate</Label>
@@ -605,17 +631,6 @@ export function GateWizard({
                   onCheckedChange={setEmailEnabled}
                 />
               </div>
-
-              {(trackActions || allFollows.length > 0) && !hasValidKey && (
-                <Alert variant="destructive">
-                  <AlertDescription>
-                    Follow/like/repost gates need a valid OpenAI key to publish.{" "}
-                    <Link href="/dashboard/settings" className="underline">
-                      Add one in Settings.
-                    </Link>
-                  </AlertDescription>
-                </Alert>
-              )}
 
               <div className="space-y-3 rounded-lg border p-4">
                 <p className="text-sm font-medium">SoundCloud track actions</p>
@@ -635,7 +650,7 @@ export function GateWizard({
                     {label}
                   </label>
                 ))}
-                {trackActions && (
+                {trackActions && unlockMode === "verified" && (
                   <div className="flex items-center justify-between border-t pt-3">
                     <div>
                       <Label htmlFor="proofCode">Proof code</Label>
@@ -682,8 +697,10 @@ export function GateWizard({
                 />
               </div>
 
+              <HeavyGateWarning asks={asks} />
+
               <p className="border-t pt-3 text-xs text-muted-foreground">
-                ⚠ Heads up: some platforms restrict requiring follows, likes, or
+                Heads up: some platforms restrict requiring follows, likes, or
                 reposts in exchange for a download. Review each platform&apos;s
                 Terms of Service and proceed at your own risk. Vividdit is not
                 affiliated with SoundCloud, Instagram, or Spotify.
@@ -740,6 +757,8 @@ export function GateWizard({
                   ]
                     .filter(Boolean)
                     .join(" + ") || "nothing yet"}
+                  {" · "}
+                  {unlockMode === "verified" ? "Verified (screenshots)" : "Quick unlock"}
                 </p>
               </div>
             </div>
@@ -768,7 +787,14 @@ export function GateWizard({
             </Button>
             <Button
               onClick={() => submit(true)}
-              disabled={submitting || !slugRegex.test(slug) || !asset}
+              disabled={
+                submitting ||
+                !slugRegex.test(slug) ||
+                !asset ||
+                (unlockMode === "verified" &&
+                  (trackActions || allFollows.length > 0) &&
+                  !hasValidKey)
+              }
             >
               {submitting ? "Publishing…" : "Publish gate"}
             </Button>
@@ -852,12 +878,12 @@ export function GatePreview({
   title: string
   artist: string
 }) {
-  const fg = readableForeground(background)
-  const labelColor = readableAccent(accent, background)
+  const theme = gateTheme(accent, background)
+  const labelColor = readableAccent(accent, theme.bg)
   return (
     <div
       className="mx-auto w-full max-w-xs overflow-hidden rounded-xl border shadow-sm"
-      style={{ backgroundColor: background, color: fg }}
+      style={{ backgroundColor: theme.bg, color: theme.fg }}
     >
       <div className="space-y-3 p-4">
         {/* big cover */}
@@ -869,30 +895,40 @@ export function GatePreview({
             className="aspect-square w-full rounded-lg object-cover"
           />
         ) : (
-          <div className="aspect-square w-full rounded-lg bg-white/10" />
+          <div
+            className="aspect-square w-full rounded-lg"
+            style={{ backgroundColor: theme.subtle }}
+          />
         )}
 
-        <div className="min-w-0">
+        <div className="min-w-0 text-center">
           <p
-            className="text-[10px] font-medium tracking-widest uppercase"
+            className="text-[10px] font-semibold tracking-widest uppercase"
             style={{ color: labelColor }}
           >
             Free download
           </p>
           <p className="truncate text-sm font-semibold">{title}</p>
-          <p className="truncate text-xs" style={{ color: muted(fg, 0.65) }}>
+          <p className="truncate text-xs" style={{ color: theme.muted }}>
             {artist}
           </p>
         </div>
 
-        {/* unlock card */}
-        <div className="space-y-2 rounded-lg bg-white p-3 text-zinc-900">
-          <p className="text-xs font-medium">Unlock the HQ download</p>
+        {/* unlock card, in the gate's own colors like the live page */}
+        <div
+          className="space-y-2 rounded-lg border p-3"
+          style={{ backgroundColor: theme.card, borderColor: theme.line }}
+        >
+          <p className="text-xs font-semibold">Where should we send it?</p>
           <div
-            className="flex h-8 items-center justify-center rounded-md text-xs font-medium text-white"
-            style={{ backgroundColor: accent }}
+            className="h-7 rounded-md border"
+            style={{ borderColor: theme.line }}
+          />
+          <div
+            className="flex h-8 items-center justify-center rounded-md text-xs font-semibold"
+            style={{ backgroundColor: theme.accent, color: theme.accentFg }}
           >
-            Get the download
+            Continue
           </div>
         </div>
       </div>

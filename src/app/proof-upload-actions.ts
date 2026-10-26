@@ -34,11 +34,21 @@ export async function completeProofUploadsAction(input: {
   statusToken: string
   batchId: string
   uploads: StagedProofUpload[]
+  // Stepped uploads (one screenshot per step on Verified gates) attach each
+  // batch to its step and leave verification for the final unlock.
+  finalize?: boolean
+  platform?: "soundcloud" | "instagram" | "spotify"
+  followTargetId?: string | null
 }): Promise<CompleteProofUploadsResult> {
   try {
     const count = await completeStagedProofUploads({
-      ...input,
-      finalize: true,
+      submissionId: input.submissionId,
+      statusToken: input.statusToken,
+      batchId: input.batchId,
+      uploads: input.uploads,
+      finalize: input.finalize !== false,
+      platform: input.platform,
+      followTargetId: input.followTargetId ?? null,
     })
     return { ok: true, count }
   } catch (error) {

@@ -11,25 +11,27 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import { hasDownloadAccess } from "@/lib/downloads"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { approveSubmission, isStaleReview } from "@/lib/unlock"
 
 export const metadata = { title: "Download status" }
 
 const STATUS_COPY: Record<string, { badge: string; title: string; body: string }> = {
   pending: {
-    badge: "Verifying",
-    title: "We're checking your proof",
-    body: "Verification usually takes under a minute. Refresh this page to see the latest status.",
+    badge: "Not finished",
+    title: "You're almost there",
+    body: "Go back to the download page to finish the steps.",
   },
   verifying: {
-    badge: "Verifying",
-    title: "We're checking your proof",
-    body: "Verification usually takes under a minute. Refresh this page to see the latest status.",
+    badge: "Checking",
+    title: "We're checking your screenshots",
+    body: "This usually takes under a minute. Refresh this page to see the latest status.",
   },
   needs_review: {
     badge: "In review",
     title: "The artist is taking a look",
-    body: "Your submission needs a quick manual review. If you left an email, you'll get your download link there once approved.",
+    body: "Your screenshots need a quick look from the artist, within 24 hours at most. If you left an email, the link comes there too.",
   },
   approved: {
     badge: "Approved",
@@ -53,14 +55,22 @@ export default async function StatusPage({
   if (!/^[0-9a-f-]{36}$/i.test(token)) notFound()
 
   const admin = createAdminClient()
-  const { data: submission } = await admin
+  const { data: found } = await admin
     .from("submissions")
     .select(
-      "id, status, proof_code, email, created_at, gates(title, artist, kind, gate_requirements(require_proof_code, soundcloud_enabled))"
+      "id, status, unlocked_at, review_started_at, proof_code, email, created_at, fraud_flags, gates(title, artist, kind, gate_requirements(require_proof_code, soundcloud_enabled))"
     )
     .eq("status_token", token)
     .maybeSingle()
-  if (!submission) notFound()
+  if (!found) notFound()
+
+  // A review that has waited past the 24-hour window is approved on the spot.
+  const submission =
+    isStaleReview(found) &&
+    (await approveSubmission(admin, found.id, ["needs_review"]))
+      ? { ...found, status: "approved" }
+      : found
+  const canDownload = hasDownloadAccess(submission)
 
   const gate = submission.gates as unknown as {
     title: string
@@ -74,12 +84,15 @@ export default async function StatusPage({
   const showProofCode =
     !!gate.gate_requirements?.soundcloud_enabled &&
     !!gate.gate_requirements?.require_proof_code
-  const copy = STATUS_COPY[submission.status] ?? STATUS_COPY.pending
+  const copy =
+    canDownload && submission.status !== "approved"
+      ? STATUS_COPY.approved
+      : (STATUS_COPY[submission.status] ?? STATUS_COPY.pending)
   const isVault = gate.kind === "vault"
 
   // Surface the AI's explanation so rejected fans know what to fix.
   let fanMessage: string | null = null
-  if (["rejected", "needs_review"].includes(submission.status)) {
+  if (submission.status === "rejected") {
     const { data: run } = await admin
       .from("verification_runs")
       .select("result")
@@ -99,7 +112,7 @@ export default async function StatusPage({
             <CardTitle>{copy.title}</CardTitle>
             <Badge
               variant={
-                submission.status === "approved"
+                canDownload
                   ? "default"
                   : submission.status === "rejected"
                     ? "destructive"
@@ -115,14 +128,14 @@ export default async function StatusPage({
         </CardHeader>
         <CardContent className="space-y-2 text-sm text-muted-foreground">
           <p>
-            {submission.status === "approved" && isVault
+            {canDownload && isVault
               ? "Your vault is unlocked — open it below to download any track."
               : copy.body}
           </p>
           {fanMessage && (
             <p className="rounded-lg border p-3 text-foreground">{fanMessage}</p>
           )}
-          {submission.status === "approved" && (
+          {canDownload && (
             <Button
               render={
                 <a
@@ -147,9 +160,10 @@ export default async function StatusPage({
               </span>
             </p>
           )}
-          {submission.status === "rejected" && (
-            <ResubmitForm submissionId={submission.id} statusToken={token} />
-          )}
+          {submission.status === "rejected" &&
+            !((submission.fraud_flags as string[] | null) ?? []).includes("revoked") && (
+              <ResubmitForm submissionId={submission.id} statusToken={token} />
+            )}
           {submission.status === "needs_review" && !submission.email && (
             <StatusEmailForm statusToken={token} />
           )}

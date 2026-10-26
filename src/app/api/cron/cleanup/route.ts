@@ -1,6 +1,8 @@
 import { after, NextResponse, type NextRequest } from "next/server"
 
+import { checkCreatorKeys } from "@/lib/key-health"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { autoApproveStaleReviews } from "@/lib/unlock"
 import { runVerification } from "@/lib/verification"
 
 const PROOF_RETENTION_DAYS = 30
@@ -85,7 +87,10 @@ export async function GET(request: NextRequest) {
   }
   const { count: unstuck } = await admin
     .from("submissions")
-    .update({ status: "needs_review" }, { count: "exact" })
+    .update(
+      { status: "needs_review", review_started_at: new Date().toISOString() },
+      { count: "exact" }
+    )
     .eq("status", "verifying")
     .lt("updated_at", stuckCutoff)
 
@@ -139,8 +144,23 @@ export async function GET(request: NextRequest) {
       })
   )
 
+  // 6. Nobody should wait on a review forever: anything the creator hasn't
+  // decided within 24 hours is approved and the fan gets their download.
+  const autoApproved = await autoApproveStaleReviews(admin)
+
+  // 7. Re-test the keys live gates depend on, so an empty AI account or a
+  // revoked Resend key shows up as a dashboard banner and one email.
+  let keys = { aiTested: 0, aiBroken: 0, emailTested: 0, emailBroken: 0 }
+  try {
+    keys = await checkCreatorKeys(admin)
+  } catch (err) {
+    console.error("[cleanup] key health check failed", err)
+  }
+
   return NextResponse.json({
     ok: true,
+    autoApproved,
+    ...keys,
     proofsDeleted,
     tokensDeleted: tokensDeleted ?? 0,
     unstuckSubmissions: unstuck ?? 0,

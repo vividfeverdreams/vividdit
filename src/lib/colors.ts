@@ -122,3 +122,68 @@ export function readableAccent(
   }
   return goLighter ? "#ffffff" : "#0a0a0a"
 }
+
+/** Blends two hex colors: t = 0 returns a, t = 1 returns b. */
+export function mixHex(a: string, b: string, t: number): string {
+  const x = hexToRgb(a)
+  const y = hexToRgb(b)
+  return rgbToHex({
+    r: x.r + (y.r - x.r) * t,
+    g: x.g + (y.g - x.g) * t,
+    b: x.b + (y.b - x.b) * t,
+  })
+}
+
+export type GateTheme = {
+  bg: string
+  fg: string
+  /** Surface of the unlock card, a step off the page background. */
+  card: string
+  line: string
+  /** Secondary text, at least 4.5:1 on the card. */
+  muted: string
+  /** Fill for finished rows and quiet controls. */
+  subtle: string
+  /** Button color, at least 3:1 against the card. */
+  accent: string
+  accentFg: string
+  /** Error text, readable on the card. */
+  danger: string
+}
+
+/** White or near-black, whichever has more contrast on the given color. */
+export function bestText(hexBg: string): string {
+  if (!isHex(hexBg)) return "#ffffff"
+  const bg = hexToRgb(hexBg)
+  return contrastRatio(hexToRgb("#ffffff"), bg) >= contrastRatio(hexToRgb("#0a0a0a"), bg)
+    ? "#ffffff"
+    : "#0a0a0a"
+}
+
+/** The fan page's palette, derived from the gate's two chosen colors. */
+export function gateTheme(accentHex: string, bgHex: string): GateTheme {
+  const bg = isHex(bgHex) ? bgHex : "#0a0a0a"
+  const fg = bestText(bg)
+  const card = mixHex(bg, fg, 0.06)
+  // Secondary text steps toward full strength until it reads at 4.5:1.
+  let muted = fg
+  for (const t of [0.62, 0.7, 0.78, 0.86, 0.94]) {
+    const candidate = mixHex(bg, fg, t)
+    if (contrastRatio(hexToRgb(candidate), hexToRgb(card)) >= 4.5) {
+      muted = candidate
+      break
+    }
+  }
+  const accent = readableAccent(isHex(accentHex) ? accentHex : fg, card, 3)
+  return {
+    bg,
+    fg,
+    card,
+    line: mixHex(bg, fg, 0.16),
+    muted,
+    subtle: mixHex(bg, fg, 0.1),
+    accent,
+    accentFg: bestText(accent),
+    danger: fg === "#ffffff" ? "#fca5a5" : "#b91c1c",
+  }
+}

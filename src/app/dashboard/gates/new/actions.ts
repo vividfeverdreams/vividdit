@@ -7,6 +7,7 @@ import { hasValidAiKey } from "@/lib/ai-keys"
 import { FREE_GATE_LIMIT } from "@/lib/limits"
 import { isHttpUrl, profileLabel } from "@/lib/profiles"
 import { resolveSoundcloudTrack, type SoundcloudTrack } from "@/lib/soundcloud"
+import { spotifyArtistName } from "@/lib/spotify"
 import { hasValidR2, presignR2Upload } from "@/lib/storage"
 import { createClient } from "@/lib/supabase/server"
 import { slugRegex } from "@/lib/validation"
@@ -90,6 +91,7 @@ const createGateSchema = z.object({
   requireLike: z.boolean(),
   requireRepost: z.boolean(),
   requireProofCode: z.boolean().default(true),
+  unlockMode: z.enum(["quick", "verified"]).default("quick"),
   followTargets: z
     .array(
       z.object({
@@ -122,6 +124,15 @@ const createGateSchema = z.object({
     .nullable(),
   publish: z.boolean(),
 })
+
+// Spotify artist links end in an opaque id; look the name up once at save.
+async function followDisplayName(platform: string, url: string): Promise<string> {
+  if (platform === "spotify") {
+    const name = await spotifyArtistName(url)
+    if (name) return name
+  }
+  return profileLabel(platform, url)
+}
 
 export type CreateGateInput = z.input<typeof createGateSchema>
 export type CreateGateResult =
@@ -162,9 +173,11 @@ export async function createGateAction(
 
   const trackActions = d.requireLike || d.requireRepost
   const targets = d.followTargets.filter((t) => isHttpUrl(t.url))
-  const aiGate = trackActions || targets.length > 0
+  const socialSteps = trackActions || targets.length > 0
+  // Only Verified gates check screenshots, so only they need an AI key.
+  const aiGate = socialSteps && d.unlockMode === "verified"
 
-  if (!d.emailEnabled && !aiGate) {
+  if (!d.emailEnabled && !socialSteps) {
     return { ok: false, error: "Enable at least one unlock requirement." }
   }
   if (d.followTargets.some((t) => !isHttpUrl(t.url))) {
@@ -190,7 +203,7 @@ export async function createGateAction(
       return {
         ok: false,
         error:
-          "Follow/social gates need a valid OpenAI key for proof verification. Add one in Settings, or switch to an email-only gate.",
+          "Verified gates need a working AI key to check screenshots. Add one in Settings, or switch to Quick unlock.",
       }
     }
   }
@@ -240,6 +253,7 @@ export async function createGateAction(
     require_proof_code: trackActions && d.requireProofCode,
     instagram_enabled: targets.some((t) => t.platform === "instagram"),
     spotify_enabled: targets.some((t) => t.platform === "spotify"),
+    unlock_mode: d.unlockMode,
   })
 
   if (reqError) {
@@ -251,13 +265,15 @@ export async function createGateAction(
     const { error: targetError } = await supabase
       .from("gate_follow_targets")
       .insert(
-        targets.map((t, i) => ({
-          gate_id: gate.id,
-          platform: t.platform,
-          profile_url: t.url,
-          display_name: profileLabel(t.platform, t.url),
-          sort_order: i,
-        }))
+        await Promise.all(
+          targets.map(async (t, i) => ({
+            gate_id: gate.id,
+            platform: t.platform,
+            profile_url: t.url,
+            display_name: await followDisplayName(t.platform, t.url),
+            sort_order: i,
+          }))
+        )
       )
     if (targetError) {
       await supabase.from("gates").delete().eq("id", gate.id)

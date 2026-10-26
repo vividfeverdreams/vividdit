@@ -76,6 +76,12 @@ export async function removeResendKey(creatorId: string) {
   if (error) throw new Error(error.message)
 }
 
+/** Whether a fan's download email can go out (a key that hasn't failed). */
+export async function canEmailFans(creatorId: string): Promise<boolean> {
+  const info = await getEmailKeyInfo(creatorId)
+  return !!info && info.keyStatus !== "invalid"
+}
+
 /** Decrypts the creator's Resend key + sender. Server-side send/test only. */
 export async function getDecryptedResendKey(
   creatorId: string
@@ -110,7 +116,7 @@ export async function testResendKey(
 
   const key = decryptSecret(row.encrypted_key)
   const domain = emailDomain(row.from_email)
-  let keyStatus: "valid" | "invalid" = "invalid"
+  let keyStatus: "valid" | "invalid" | null = "invalid"
   let lastError: string | null = null
 
   try {
@@ -144,6 +150,8 @@ export async function testResendKey(
       }
     }
   } catch (err) {
+    // Unreachable: keep the last known status instead of calling it broken.
+    keyStatus = null
     lastError =
       err instanceof Error && err.name === "TimeoutError"
         ? "Resend API timed out"
@@ -153,7 +161,7 @@ export async function testResendKey(
   await admin
     .from("creator_email_keys")
     .update({
-      key_status: keyStatus,
+      ...(keyStatus ? { key_status: keyStatus } : {}),
       last_tested_at: new Date().toISOString(),
       last_error: lastError,
     })

@@ -70,8 +70,9 @@ export function OpenAiKeySection({
       <div>
         <h2 className="text-lg font-medium">Verification API key</h2>
         <p className="text-sm text-muted-foreground">
-          Used to verify fan proof screenshots with AI. Required before
-          publishing a SoundCloud gate; email-only gates work without it. Paste
+          Checks fans&apos; screenshots on Verified gates. Quick unlock gates
+          (the default) don&apos;t need it. Testing makes a tiny real request,
+          so an account with no credits shows up here. Paste
           an <strong>OpenAI</strong> key (<code className="rounded bg-muted px-1">sk-…</code>){" "}
           or an{" "}
           <a

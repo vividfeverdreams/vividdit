@@ -48,7 +48,7 @@ describe("image hashing", () => {
     const h1 = await perceptualHash(original)
     const h2 = await perceptualHash(resized)
     expect(exactHash(original)).not.toBe(exactHash(resized))
-    expect(hammingDistance(h1, h2)).toBeLessThanOrEqual(8)
+    expect(hammingDistance(h1!, h2!)).toBeLessThanOrEqual(8)
   })
 
   it("perceptualHash separates genuinely different images", async () => {
@@ -82,7 +82,7 @@ describe("image hashing", () => {
       .png()
       .toBuffer()
     const b = await perceptualHash(dark)
-    expect(hammingDistance(a, b)).toBeGreaterThan(8)
+    expect(hammingDistance(a!, b!)).toBeGreaterThan(8)
   })
 
   it("rejects non-image bytes", async () => {
